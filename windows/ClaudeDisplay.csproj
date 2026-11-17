@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Claude Display für Windows (läuft zum Testen auch auf macOS).
+      dotnet run                                  # testen
+      dotnet publish -c Release -r win-x64        # ClaudeDisplay.exe (eine Datei, ohne Installation)
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ClaudeDisplay</AssemblyName>
+    <RootNamespace>ClaudeDisplay</RootNamespace>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <Version>1.0.0</Version>
+    <Product>Claude Display</Product>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'win-x64'">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <!-- Update-Kanal und Firmware-Version (vom Release-Skript gesetzt: -p:UpdateRepo=owner/name) -->
+  <PropertyGroup>
+    <UpdateRepo Condition="'$(UpdateRepo)' == ''"></UpdateRepo>
+    <FirmwareVersion Condition="'$(FirmwareVersion)' == ''">1.0</FirmwareVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="UpdateRepo" Value="$(UpdateRepo)" />
+    <AssemblyMetadata Include="FirmwareVersion" Value="$(FirmwareVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\app.ico" />
+    <AvaloniaResource Include="Assets\tray.ico" />
+    <EmbeddedResource Include="Assets\firmware.bin.gz" LogicalName="firmware.bin.gz" />
+  </ItemGroup>
+
+</Project>

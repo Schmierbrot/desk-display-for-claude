@@ -1,0 +1,4 @@
+#!/bin/sh
+# laufende App vor dem Ersetzen beenden
+pkill -x ClaudeDisplay 2>/dev/null || true
+exit 0

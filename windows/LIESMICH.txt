@@ -1,0 +1,31 @@
+Claude Display für Windows
+=========================
+
+Zeigt die gerade arbeitende Claude-Code-Sitzung und dein Nutzungslimit auf dem
+Claude Display (GeekMagic SmallTV-Ultra; die Firmware spielt der Assistent selbst auf).
+
+Start
+-----
+1. ClaudeDisplay.exe an einen festen Ort kopieren, z. B. in "Dokumente\Claude Display".
+2. Doppelklick. Beim ersten Start warnt Windows evtl. ("Der Computer wurde durch
+   Windows geschützt"), weil die Datei nicht signiert ist:
+   "Weitere Informationen" -> "Trotzdem ausführen".
+3. Beim ersten Start öffnet sich der Einrichtungs-Assistent: Er sucht das Display
+   im WLAN, spielt bei einem neuen SmallTV-Ultra die Firmware auf und lässt dich
+   einen Look wählen.
+4. Unten rechts im Tray erscheint das Display-Symbol. Klick = Panel,
+   Rechtsklick = Menü mit Einstellungen und Beenden.
+5. Farben für App und Display: Einstellungen -> Darstellung.
+
+Mac und PC am selben Display
+----------------------------
+Beide Rechner dürfen gleichzeitig laufen. Wer eine aktive Claude-Sitzung hat,
+bekommt das Display. Arbeiten beide oder keiner, bleibt der bisherige Rechner dran.
+
+Nutzungslimit
+-------------
+Wird etwa jede Minute live über deinen Claude-Code-Login gelesen
+(%USERPROFILE%\.claude\.credentials.json). Werte älter als 10 Minuten werden
+nicht mehr gezeigt. Abfragen macht nur der Rechner, der gerade aufs Display zeichnet.
+
+Einstellungen liegen in %APPDATA%\ClaudeDisplay\settings.json.

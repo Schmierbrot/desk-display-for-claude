@@ -1,0 +1,8 @@
+#!/bin/sh
+# App für den angemeldeten Benutzer starten (der Installer läuft als root)
+CONSOLE_USER=$(stat -f%Su /dev/console)
+if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
+    UID_NUM=$(id -u "$CONSOLE_USER")
+    launchctl asuser "$UID_NUM" sudo -u "$CONSOLE_USER" open "/Applications/Claude Display.app" || true
+fi
+exit 0
