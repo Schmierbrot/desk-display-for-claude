@@ -5,7 +5,8 @@ using System.Text.Json;
 
 namespace ClaudeDisplay.Core;
 
-public sealed record PlanItem(string Text, string Status);
+/// <summary>Id = Aufgaben-Nummer bei TaskCreate/TaskUpdate (Claude Code im Terminal).</summary>
+public sealed record PlanItem(string Text, string Status, string? Id = null);
 
 /// <summary>Die gerade arbeitende Claude-Code-Sitzung.</summary>
 public sealed record SessionInfo(string Name, int Secs, IReadOnlyList<PlanItem> Plan, string? Prompt, int BusyCount)
@@ -65,19 +66,69 @@ sealed class TranscriptState
     {
         var type = Str(d, "type");
         if (type == "last-prompt") { LastPrompt = Str(d, "lastPrompt"); return; }
-        if (type != "assistant" || Bool(d, "isSidechain")) return;
+        if (Bool(d, "isSidechain")) return;
         if (!d.TryGetProperty("message", out var msg) || msg.ValueKind != JsonValueKind.Object) return;
         if (!msg.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array) return;
+        if (type == "user") { HandleResults(content, d.TryGetProperty("toolUseResult", out var tr) ? tr : default); return; }
+        if (type != "assistant") return;
         foreach (var c in content.EnumerateArray())
         {
             if (Str(c, "type") != "tool_use") continue;
             var name = Str(c, "name") ?? "";
             var input = c.TryGetProperty("input", out var i) ? i : default;
-            if (name.EndsWith("update_plan")) ApplyPlanUpdate(input);
+            if (name == "TaskCreate")
+            {
+                var subject = Str(input, "subject") ?? Str(input, "description") ?? "";
+                // neue Aufgabenliste, sobald die alte ganz erledigt ist
+                if (plan.Count > 0 && plan.All(p => p.Status == "completed") && plan.Any(p => p.Id != null)) plan = [];
+                plan.Add(new PlanItem(subject, "pending"));
+                if (Str(c, "id") is { } tid) pendingCreates[tid] = plan.Count - 1;
+            }
+            else if (name == "TaskUpdate")
+            {
+                var id = IdString(input, "taskId");
+                int k = id == null ? -1 : plan.FindIndex(p => p.Id == id);
+                if (k < 0) continue;
+                if (Str(input, "status") is { } st)
+                {
+                    if (st == "deleted") { plan.RemoveAt(k); continue; }
+                    plan[k] = plan[k] with { Status = st };
+                }
+                if (Str(input, "subject") is { Length: > 0 } sub) plan[k] = plan[k] with { Text = sub };
+            }
+            else if (name.EndsWith("update_plan")) ApplyPlanUpdate(input);
             else if (name.EndsWith("wrap_up") && !Bool(input, "blocked"))
                 plan = plan.Select(p => p with { Status = "completed" }).ToList();   // blocked = wartet auf dich
             else if (name == "TodoWrite" && input.ValueKind == JsonValueKind.Object && input.TryGetProperty("todos", out var todos))
                 plan = Items(todos);
+        }
+    }
+
+    /// <summary>TaskCreate-Aufrufe, deren Nummer erst im Ergebnis steht: tool_use_id → Index im Plan.</summary>
+    readonly Dictionary<string, int> pendingCreates = [];
+
+    static string? IdString(JsonElement e, string key) =>
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(key, out var v)
+            ? v.ValueKind switch { JsonValueKind.String => v.GetString(), JsonValueKind.Number => v.GetRawText(), _ => null }
+            : null;
+
+    /// <summary>Ergebnis von TaskCreate: „Task #3 created successfully: …“ → Nummer merken.</summary>
+    void HandleResults(JsonElement content, JsonElement result)
+    {
+        foreach (var c in content.EnumerateArray())
+        {
+            if (Str(c, "type") != "tool_result" || Str(c, "tool_use_id") is not { } tid) continue;
+            if (!pendingCreates.Remove(tid, out int idx) || idx >= plan.Count) continue;
+            string? id = result.ValueKind == JsonValueKind.Object && result.TryGetProperty("task", out var task) ? IdString(task, "id") : null;
+            if (id == null)
+            {
+                var text = Str(c, "content") ?? (c.TryGetProperty("content", out var arr) && arr.ValueKind == JsonValueKind.Array
+                    ? string.Concat(arr.EnumerateArray().Select(x => Str(x, "text") ?? "")) : "");
+                var m = System.Text.RegularExpressions.Regex.Match(text, @"Task #(\S+) created");
+                if (m.Success) id = m.Groups[1].Value;
+            }
+            if (id != null) plan[idx] = plan[idx] with { Id = id };
+            else if (Bool(c, "is_error")) plan.RemoveAt(idx);
         }
     }
 
@@ -119,6 +170,7 @@ public sealed class ClaudeData
     public SessionInfo? CurrentSession()
     {
         var busy = new List<JsonElement>();
+        bool anyStatus = false;
         try
         {
             foreach (var f in Directory.EnumerateFiles(SessionsDir, "*.json"))
@@ -128,12 +180,16 @@ public sealed class ClaudeData
                     var s = JsonDocument.Parse(File.ReadAllText(f)).RootElement;
                     if (!s.TryGetProperty("pid", out var pidEl) || !pidEl.TryGetInt32(out int pid) || !PidAlive(pid)) continue;
                     var status = s.TryGetProperty("status", out var st) ? st.GetString() : null;
+                    if (status != null) anyStatus = true;
                     if (status != null && status != "idle") busy.Add(s);
                 }
                 catch { }
             }
         }
-        catch { return null; }
+        catch { /* noch keine Sitzungsdateien */ }
+        // Ältere Claude-Code-Versionen schreiben keinen Status: dann gilt die Sitzung
+        // als aktiv, deren Protokoll gerade wächst.
+        if (!anyStatus && RecentlyActiveTranscript() is { } recent) busy.Add(recent);
 
         static double Updated(JsonElement s) => s.TryGetProperty("statusUpdatedAt", out var v) && v.TryGetDouble(out var d) ? d : 0;
         var cur = busy.OrderByDescending(Updated).FirstOrDefault();
@@ -148,6 +204,35 @@ public sealed class ClaudeData
         if (string.IsNullOrWhiteSpace(name)) name = "Sitzung";
         var secs = (int)Math.Max(0, DateTimeOffset.UtcNow.ToUnixTimeSeconds() - Updated(cur) / 1000);
         return new SessionInfo(name, secs, tr?.Plan.ToList() ?? [], tr?.LastPrompt, busy.Count);
+    }
+
+    readonly Dictionary<string, double> activeSince = [];
+    DateTime lastScan = DateTime.MinValue;
+    JsonElement? lastFound;
+
+    /// <summary>Für den Fall ohne Status: jüngstes Protokoll, das in den letzten 20 s geschrieben wurde.</summary>
+    JsonElement? RecentlyActiveTranscript()
+    {
+        if (DateTime.UtcNow - lastScan < TimeSpan.FromSeconds(3)) return lastFound;
+        lastScan = DateTime.UtcNow;
+        FileInfo? best = null;
+        try
+        {
+            foreach (var dir in Directory.EnumerateDirectories(ProjectsDir))
+                foreach (var f in new DirectoryInfo(dir).EnumerateFiles("*.jsonl"))
+                    if (best == null || f.LastWriteTimeUtc > best.LastWriteTimeUtc) best = f;
+        }
+        catch { }
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+        if (best == null || DateTime.UtcNow - best.LastWriteTimeUtc > TimeSpan.FromSeconds(20))
+        { activeSince.Clear(); return lastFound = null; }
+        var id = Path.GetFileNameWithoutExtension(best.Name);
+        var since = activeSince.TryGetValue(id, out var v) ? v : now;
+        activeSince.Clear(); activeSince[id] = since;
+        // Projektordner heißt wie der Pfad, mit „-“ statt „\“ – der letzte Teil reicht als Name.
+        var name = best.Directory?.Name.Split('-').LastOrDefault() ?? "";
+        return lastFound = JsonSerializer.SerializeToElement(new Dictionary<string, object>
+            { ["sessionId"] = id, ["cwd"] = name, ["statusUpdatedAt"] = since * 1000 });
     }
 
     static bool PidAlive(int pid)

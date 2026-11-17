@@ -3,6 +3,7 @@ import Foundation
 struct PlanItem: Equatable {
     var text: String
     var status: String          // pending | in_progress | completed
+    var id: String? = nil       // Aufgaben-Nummer bei TaskCreate/TaskUpdate (Claude Code im Terminal)
 }
 
 /// Die gerade arbeitende Claude-Code-Sitzung.
@@ -61,16 +62,36 @@ final class TranscriptState {
         }
     }
 
+    /// TaskCreate-Aufrufe, deren Nummer erst im Ergebnis steht: tool_use_id → Index im Plan
+    private var pendingCreates: [String: Int] = [:]
+
     private func handle(_ d: [String: Any]) {
         let type = d["type"] as? String
         if type == "last-prompt" { lastPrompt = d["lastPrompt"] as? String; return }
-        guard type == "assistant", (d["isSidechain"] as? Bool) != true,
+        guard (d["isSidechain"] as? Bool) != true,
               let msg = d["message"] as? [String: Any],
               let content = msg["content"] as? [[String: Any]] else { return }
+        if type == "user" { handleResults(content, d["toolUseResult"] as? [String: Any]); return }
+        guard type == "assistant" else { return }
         for c in content where c["type"] as? String == "tool_use" {
             let name = c["name"] as? String ?? ""
             let input = c["input"] as? [String: Any] ?? [:]
-            if name.hasSuffix("update_plan") {
+            if name == "TaskCreate" {
+                let subject = (input["subject"] as? String) ?? (input["description"] as? String) ?? ""
+                if plan.allSatisfy({ $0.status == "completed" }) && plan.contains(where: { $0.id != nil }) {
+                    plan = []            // neue Aufgabenliste, sobald die alte ganz erledigt ist
+                }
+                plan.append(PlanItem(text: subject, status: "pending"))
+                if let tid = c["id"] as? String { pendingCreates[tid] = plan.count - 1 }
+            } else if name == "TaskUpdate" {
+                guard let id = Self.idString(input["taskId"]),
+                      let i = plan.firstIndex(where: { $0.id == id }) else { continue }
+                if let st = input["status"] as? String {
+                    if st == "deleted" { plan.remove(at: i); continue }
+                    plan[i].status = st
+                }
+                if let sub = input["subject"] as? String, !sub.isEmpty { plan[i].text = sub }
+            } else if name.hasSuffix("update_plan") {
                 applyPlanUpdate(input)
             } else if name.hasSuffix("wrap_up"), (input["blocked"] as? Bool) != true {
                 // Wartet Claude auf dich (blocked), ist der Plan noch nicht fertig.
@@ -80,6 +101,30 @@ final class TranscriptState {
                                             status: $0["status"] as? String ?? "pending") }
             }
         }
+    }
+
+    /// Ergebnis von TaskCreate: „Task #3 created successfully: …“ → Nummer merken.
+    private func handleResults(_ content: [[String: Any]], _ result: [String: Any]?) {
+        for c in content where c["type"] as? String == "tool_result" {
+            guard let tid = c["tool_use_id"] as? String, let idx = pendingCreates.removeValue(forKey: tid),
+                  idx < plan.count else { continue }
+            var id = Self.idString((result?["task"] as? [String: Any])?["id"])
+            if id == nil {
+                let text = (c["content"] as? String)
+                    ?? (c["content"] as? [[String: Any]])?.compactMap { $0["text"] as? String }.joined()
+                    ?? ""
+                if let r = text.range(of: #"Task #(\S+) created"#, options: .regularExpression) {
+                    id = String(text[r].dropFirst(6).dropLast(8))
+                }
+            }
+            if let id { plan[idx].id = id } else if c["is_error"] as? Bool == true { plan.remove(at: idx) }
+        }
+    }
+
+    private static func idString(_ v: Any?) -> String? {
+        if let s = v as? String { return s }
+        if let n = v as? NSNumber { return n.stringValue }
+        return nil
     }
 
     private func applyPlanUpdate(_ inp: [String: Any]) {
@@ -114,13 +159,18 @@ final class ClaudeData {
     func currentSession() -> SessionInfo? {
         let files = (try? FileManager.default.contentsOfDirectory(at: sessionsDir, includingPropertiesForKeys: nil)) ?? []
         var busy: [[String: Any]] = []
+        var anyStatus = false
         for f in files where f.pathExtension == "json" {
             guard let data = try? Data(contentsOf: f),
                   let s = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let pid = s["pid"] as? Int32, pidAlive(pid) else { continue }
+                  let pid = (s["pid"] as? NSNumber)?.int32Value, pidAlive(pid) else { continue }
             let status = s["status"] as? String
+            if status != nil { anyStatus = true }
             if status != nil && status != "idle" { busy.append(s) }
         }
+        // Ältere Claude-Code-Versionen schreiben keinen Status: dann gilt die Sitzung
+        // als aktiv, deren Protokoll gerade wächst.
+        if !anyStatus, let s = recentlyActiveTranscript() { busy.append(s) }
         busy.sort { ($0["statusUpdatedAt"] as? Double ?? 0) > ($1["statusUpdatedAt"] as? Double ?? 0) }
         guard let s = busy.first else { return nil }
 
@@ -134,6 +184,36 @@ final class ClaudeData {
         return SessionInfo(name: name.isEmpty ? "Sitzung" : name,
                            secs: max(0, Int(Date().timeIntervalSince1970 - since)),
                            plan: st?.plan ?? [], prompt: st?.lastPrompt, busyCount: busy.count)
+    }
+
+    /// Für den Fall ohne Status: jüngstes Protokoll, das in den letzten 20 s geschrieben wurde.
+    private var activeSince: [String: Double] = [:]
+    private var lastScan = Date.distantPast
+    private var lastFound: [String: Any]?
+
+    private func recentlyActiveTranscript() -> [String: Any]? {
+        if Date().timeIntervalSince(lastScan) < 3 { return lastFound }
+        lastScan = Date()
+        let fm = FileManager.default
+        var best: (URL, Date)?
+        for dir in (try? fm.contentsOfDirectory(at: projectsDir, includingPropertiesForKeys: nil)) ?? [] {
+            for f in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            where f.pathExtension == "jsonl" {
+                guard let m = try? f.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate else { continue }
+                if best == nil || m > best!.1 { best = (f, m) }
+            }
+        }
+        let now = Date().timeIntervalSince1970
+        guard let (url, mod) = best, now - mod.timeIntervalSince1970 < 20 else {
+            activeSince = [:]; lastFound = nil; return nil
+        }
+        let id = url.deletingPathExtension().lastPathComponent
+        let since = activeSince[id] ?? now
+        activeSince = [id: since]
+        // Projektordner heißt wie der Pfad, mit „-“ statt „/“ – der letzte Teil reicht als Name.
+        let name = url.deletingLastPathComponent().lastPathComponent.split(separator: "-").last.map(String.init) ?? ""
+        lastFound = ["sessionId": id, "cwd": name, "statusUpdatedAt": since * 1000]
+        return lastFound
     }
 
     private func pidAlive(_ pid: Int32) -> Bool {

@@ -19,6 +19,8 @@ struct ClaudeDisplayApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var napGuard: NSObjectProtocol?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--render-test"), i + 1 < args.count {
@@ -46,6 +48,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             print(String(describing: ClaudeData().usage(live: true)))
             exit(0)
         }
+        // Ohne sichtbares Fenster würde macOS die App per App Nap ausbremsen – dann
+        // käme der Sekundentakt fürs Display nur noch sporadisch. Ruhezustand bleibt erlaubt.
+        napGuard = ProcessInfo.processInfo.beginActivity(
+            options: .userInitiatedAllowingIdleSystemSleep,
+            reason: "Claude Display aktualisiert das Display jede Sekunde")
         Engine.shared.start()
         ClaudeConnect.shared.refresh()
         Updater.shared.checkIfDue()

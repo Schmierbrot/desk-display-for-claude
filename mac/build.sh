@@ -16,6 +16,11 @@ swift build -c release --arch arm64 --arch x86_64
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/apple/Products/Release/ClaudeDisplay "$APP/Contents/MacOS/ClaudeDisplay"
+# Debug-Symbole entfernen – sie enthalten die lokalen Build-Pfade (inkl. Benutzername)
+strip -S -x "$APP/Contents/MacOS/ClaudeDisplay"
+if LC_ALL=C /usr/bin/grep -aqF "$HOME" "$APP/Contents/MacOS/ClaudeDisplay"; then
+    echo "Fehler: Die App enthält noch lokale Pfade ($HOME)." >&2; exit 1
+fi
 
 # App-Symbol
 if [ ! -f build/AppIcon.icns ]; then
