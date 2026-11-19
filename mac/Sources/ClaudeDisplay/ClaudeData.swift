@@ -35,16 +35,23 @@ struct Usage: Equatable {
 
 /// Liest ein Protokoll (JSONL) inkrementell und spielt den Aufgabenplan nach.
 final class TranscriptState {
-    let url: URL
+    let url: URL?
     private var offset: UInt64 = 0
     private var rest = Data()
     private(set) var plan: [PlanItem] = []
     private(set) var lastPrompt: String?
 
-    init(url: URL) { self.url = url }
+    /// Cloud-Sitzung: Ereignisse kommen per `feed`, Eingaben gelten als Aufgabe
+    private let promptsFromUser: Bool
+
+    init(url: URL) { self.url = url; promptsFromUser = false }
+    init(cloud: Void) { url = nil; promptsFromUser = true }
+
+    /// Ein Ereignis (gleiches Format wie eine Protokollzeile)
+    func feed(_ d: [String: Any]) { handle(d) }
 
     func update() {
-        guard let fh = try? FileHandle(forReadingFrom: url) else { return }
+        guard let url, let fh = try? FileHandle(forReadingFrom: url) else { return }
         defer { try? fh.close() }
         let size = (try? fh.seekToEnd()) ?? 0
         if size < offset { offset = 0; rest = Data(); plan = []; lastPrompt = nil }
@@ -68,10 +75,19 @@ final class TranscriptState {
     private func handle(_ d: [String: Any]) {
         let type = d["type"] as? String
         if type == "last-prompt" { lastPrompt = d["lastPrompt"] as? String; return }
-        guard (d["isSidechain"] as? Bool) != true,
-              let msg = d["message"] as? [String: Any],
-              let content = msg["content"] as? [[String: Any]] else { return }
-        if type == "user" { handleResults(content, d["toolUseResult"] as? [String: Any]); return }
+        // Unteragenten: lokal isSidechain, in der Cloud parent_tool_use_id
+        guard (d["isSidechain"] as? Bool) != true, d["parent_tool_use_id"] as? String == nil,
+              let msg = d["message"] as? [String: Any] else { return }
+        if promptsFromUser, type == "user" {
+            let text = (msg["content"] as? String)
+                ?? (msg["content"] as? [[String: Any]])?.filter { $0["type"] as? String == "text" }
+                    .compactMap { $0["text"] as? String }.joined(separator: " ")
+            if let t = text?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty, !t.hasPrefix("<") { lastPrompt = t }
+        }
+        guard let content = msg["content"] as? [[String: Any]] else { return }
+        if type == "user" {
+            handleResults(content, (d["toolUseResult"] ?? d["tool_use_result"]) as? [String: Any]); return
+        }
         guard type == "assistant" else { return }
         for c in content where c["type"] as? String == "tool_use" {
             let name = c["name"] as? String ?? ""
@@ -172,7 +188,13 @@ final class ClaudeData {
         // als aktiv, deren Protokoll gerade wächst.
         if !anyStatus, let s = recentlyActiveTranscript() { busy.append(s) }
         busy.sort { ($0["statusUpdatedAt"] as? Double ?? 0) > ($1["statusUpdatedAt"] as? Double ?? 0) }
-        guard let s = busy.first else { return nil }
+        // Cloud-Sitzungen (Claude Code im Browser/in der Cloud) – lokale Arbeit hat Vorrang
+        let cloud = CloudSessions.shared.running()
+        guard let s = busy.first else {
+            guard var c = cloud.first else { return nil }
+            c.busyCount = cloud.count
+            return c
+        }
 
         let id = s["sessionId"] as? String ?? ""
         let st = transcript(id)
@@ -183,7 +205,7 @@ final class ClaudeData {
         let since = (s["statusUpdatedAt"] as? Double ?? 0) / 1000
         return SessionInfo(name: name.isEmpty ? "Sitzung" : name,
                            secs: max(0, Int(Date().timeIntervalSince1970 - since)),
-                           plan: st?.plan ?? [], prompt: st?.lastPrompt, busyCount: busy.count)
+                           plan: st?.plan ?? [], prompt: st?.lastPrompt, busyCount: busy.count + cloud.count)
     }
 
     /// Für den Fall ohne Status: jüngstes Protokoll, das in den letzten 20 s geschrieben wurde.

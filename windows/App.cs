@@ -67,6 +67,7 @@ public sealed class App : Application
             TrayIcon.SetIcons(this, [tray]);
 
             Engine.Shared.Start();
+            CloudSessions.Shared.Start();
             ClaudeConnect.Shared.Refresh();
             Updater.Shared.CheckIfDue();
             var updateTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromHours(6) };

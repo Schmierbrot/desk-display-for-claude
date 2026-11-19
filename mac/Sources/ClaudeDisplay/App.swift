@@ -44,6 +44,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
+        if args.contains("--cloud-test") {
+            // Cloud-Abfrage prüfen; mit „bridge“ auch lokale Sitzungen mit Fernsteuerung
+            CloudSessions.shared.includeBridge = args.contains("bridge")
+            CloudSessions.shared.tick()
+            for s in CloudSessions.shared.running() {
+                print("Sitzung:", s.name, "| Laufzeit", s.secs, "s | erledigt", s.done, "/", s.plan.count,
+                      "| Schritt:", s.currentStep ?? "-", "| Eingabe:", (s.prompt ?? "-").prefix(40))
+            }
+            if CloudSessions.shared.running().isEmpty { print("keine laufende Cloud-Sitzung") }
+            if let s = ClaudeData().currentSession() { print("Display zeigt:", s.name, "| erledigt", s.done, "/", s.plan.count, "| aktiv:", s.busyCount) }
+            exit(0)
+        }
         if args.contains("--usage-test") {
             print(String(describing: ClaudeData().usage(live: true)))
             exit(0)
@@ -54,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             options: .userInitiatedAllowingIdleSystemSleep,
             reason: "Claude Display aktualisiert das Display jede Sekunde")
         Engine.shared.start()
+        CloudSessions.shared.start()
         ClaudeConnect.shared.refresh()
         Updater.shared.checkIfDue()
         Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { _ in Updater.shared.checkIfDue() }

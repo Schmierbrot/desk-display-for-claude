@@ -243,6 +243,11 @@ struct ClaudePage: View {
                 Toggle("", isOn: $settings.liveUsage).toggleStyle(.switch).labelsHidden()
             }
         }
+        Card(title: "Sitzungen") {
+            Row(label: "Cloud-Sitzungen anzeigen", hint: "Auch Claude Code im Browser oder in der Cloud – über deinen Claude-Code-Login. Sitzungen auf diesem Rechner haben Vorrang.") {
+                Toggle("", isOn: $settings.cloudSessions).toggleStyle(.switch).labelsHidden()
+            }
+        }
     }
 }
 

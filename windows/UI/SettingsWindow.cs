@@ -372,6 +372,8 @@ public sealed class SettingsWindow : Window
             Card("Konto", ClaudeView(openSetup)),
             Card("Nutzungslimit", Row("Live-Nutzungslimit", Switch(s.LiveUsage, v => { s.LiveUsage = v; s.Save(); }),
                 "Etwa jede Minute über deinen Claude-Code-Login.")),
+            Card("Sitzungen", Row("Cloud-Sitzungen anzeigen", Switch(s.CloudSessions, v => { s.CloudSessions = v; s.Save(); }),
+                "Auch Claude Code im Browser oder in der Cloud – über deinen Claude-Code-Login. Sitzungen auf diesem Rechner haben Vorrang.")),
         } };
     }
 

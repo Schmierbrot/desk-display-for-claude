@@ -15,6 +15,8 @@ final class AppSettings {
     var nightStart: Int { didSet { d.set(nightStart, forKey: "nightStart") } }
     var nightEnd: Int { didSet { d.set(nightEnd, forKey: "nightEnd") } }
     var liveUsage: Bool { didSet { d.set(liveUsage, forKey: "liveUsage") } }
+    /// Cloud-Sitzungen (Claude Code im Browser/in der Cloud) mit anzeigen
+    var cloudSessions: Bool { didSet { d.set(cloudSessions, forKey: "cloudSessions") } }
     /// "menubar" = nur Menüleiste, "window" = App-Fenster mit Dock-Symbol
     var appMode: String { didSet { d.set(appMode, forKey: "appMode") } }
     var autoUpdate: Bool { didSet { d.set(autoUpdate, forKey: "autoUpdate") } }
@@ -55,7 +57,7 @@ final class AppSettings {
         d.register(defaults: [
             "host": "", "enabled": true,
             "dayBrightness": 60.0, "nightBrightness": 8.0,
-            "nightMode": true, "nightStart": 22, "nightEnd": 7, "liveUsage": true,
+            "nightMode": true, "nightStart": 22, "nightEnd": 7, "liveUsage": true, "cloudSessions": true,
             "displayThemeId": "neon", "appThemeId": "neon",
             "appMode": "menubar", "autoUpdate": true,
         ])
@@ -77,6 +79,7 @@ final class AppSettings {
         nightStart = d.integer(forKey: "nightStart")
         nightEnd = d.integer(forKey: "nightEnd")
         liveUsage = d.bool(forKey: "liveUsage")
+        cloudSessions = d.bool(forKey: "cloudSessions")
         if let id = d.object(forKey: "hostId") as? Int, id > 1 {
             hostId = UInt32(truncatingIfNeeded: id)
         } else {

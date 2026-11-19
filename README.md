@@ -8,7 +8,7 @@
 
 ## Funktionen
 
-- **Live-Sitzung** – Name, Laufzeit, Fortschrittsring und der aktuelle Schritt der gerade arbeitenden Claude-Code-Sitzung
+- **Live-Sitzung** – Name, Laufzeit, Fortschrittsring und der aktuelle Schritt der gerade arbeitenden Claude-Code-Sitzung – aus der Desktop-App, dem Terminal und auch aus **Cloud-Sitzungen** (Claude Code im Browser)
 - **Nutzungslimit** – 5-Stunden- und Wochenlimit mit Zeit bis zum Reset, etwa jede Minute aktualisiert
 - **Eigene Uhr** – läuft kein Rechner, zeigt das Display Uhrzeit und Datum (Zeit per NTP)
 - **Mac und PC gleichzeitig** – der Rechner mit aktiver Sitzung bekommt das Display
@@ -47,9 +47,9 @@ Beim ersten Start führt dich der Assistent durch alles:
 ## Wichtige Hinweise
 
 - **Inoffizielles Projekt.** Nicht von Anthropic. „Claude“ ist eine Marke von Anthropic.
-- **Nutzungslimit:** Die App liest das Limit über den lokalen Login der Claude-Code-CLI und eine nicht offiziell dokumentierte Schnittstelle. Sie kann sich jederzeit ändern; dann fehlt nur die Limit-Anzeige.
+- **Nutzungslimit und Cloud-Sitzungen:** Die App liest beides über den lokalen Login der Claude-Code-CLI und nicht offiziell dokumentierte Schnittstellen. Sie können sich jederzeit ändern; dann fehlt nur die jeweilige Anzeige. Cloud-Sitzungen lassen sich in den Einstellungen abschalten.
 - **Firmware:** Das Aufspielen ersetzt die Original-Firmware (Wetter, Fotos). Zurück zur Original-Firmware kann GeekMagic einen Aktivierungscode verlangen. Der USB-Anschluss liefert nur Strom – startet eine Firmware gar nicht, hilft nur ein serieller Adapter.
-- **Datenschutz:** Alles läuft lokal. Die App spricht nur mit deinem Display im WLAN, mit Anthropic (Limit, Login) und mit GitHub (Updates). Keine Telemetrie.
+- **Datenschutz:** Alles läuft lokal. Die App spricht nur mit deinem Display im WLAN, mit Anthropic (Limit, Login, Cloud-Sitzungen) und mit GitHub (Updates). Keine Telemetrie.
 
 ## Wie es funktioniert
 

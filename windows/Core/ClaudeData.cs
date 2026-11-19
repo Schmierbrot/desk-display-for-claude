@@ -23,7 +23,9 @@ public sealed record Usage(UsageWindow Five, UsageWindow Week, DateTime? Stale);
 /// <summary>Liest ein Sitzungsprotokoll (JSONL) inkrementell und spielt den Aufgabenplan nach.</summary>
 sealed class TranscriptState
 {
-    readonly string path;
+    readonly string? path;
+    /// <summary>Cloud-Sitzung: Ereignisse kommen per Feed, Eingaben gelten als Aufgabe.</summary>
+    readonly bool promptsFromUser;
     long offset;
     byte[] rest = [];
     List<PlanItem> plan = [];
@@ -31,9 +33,14 @@ sealed class TranscriptState
     public string? LastPrompt { get; private set; }
 
     public TranscriptState(string path) => this.path = path;
+    public TranscriptState() { path = null; promptsFromUser = true; }
+
+    /// <summary>Ein Ereignis (gleiches Format wie eine Protokollzeile).</summary>
+    public void Feed(JsonElement d) { try { Handle(d); } catch { } }
 
     public void Update()
     {
+        if (path == null) return;
         try
         {
             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -66,10 +73,22 @@ sealed class TranscriptState
     {
         var type = Str(d, "type");
         if (type == "last-prompt") { LastPrompt = Str(d, "lastPrompt"); return; }
-        if (Bool(d, "isSidechain")) return;
+        // Unteragenten: lokal isSidechain, in der Cloud parent_tool_use_id
+        if (Bool(d, "isSidechain") || Str(d, "parent_tool_use_id") != null) return;
         if (!d.TryGetProperty("message", out var msg) || msg.ValueKind != JsonValueKind.Object) return;
+        if (promptsFromUser && type == "user" && msg.TryGetProperty("content", out var pc))
+        {
+            var text = pc.ValueKind == JsonValueKind.String ? pc.GetString()
+                : pc.ValueKind == JsonValueKind.Array ? string.Join(" ", pc.EnumerateArray().Where(x => Str(x, "type") == "text").Select(x => Str(x, "text"))) : null;
+            text = text?.Trim();
+            if (!string.IsNullOrEmpty(text) && !text.StartsWith('<')) LastPrompt = text;
+        }
         if (!msg.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array) return;
-        if (type == "user") { HandleResults(content, d.TryGetProperty("toolUseResult", out var tr) ? tr : default); return; }
+        if (type == "user")
+        {
+            var tr = d.TryGetProperty("toolUseResult", out var a) ? a : d.TryGetProperty("tool_use_result", out var b) ? b : default;
+            HandleResults(content, tr); return;
+        }
         if (type != "assistant") return;
         foreach (var c in content.EnumerateArray())
         {
@@ -193,7 +212,10 @@ public sealed class ClaudeData
 
         static double Updated(JsonElement s) => s.TryGetProperty("statusUpdatedAt", out var v) && v.TryGetDouble(out var d) ? d : 0;
         var cur = busy.OrderByDescending(Updated).FirstOrDefault();
-        if (cur.ValueKind != JsonValueKind.Object) return null;
+        // Cloud-Sitzungen (Claude Code im Browser/in der Cloud) – lokale Arbeit hat Vorrang
+        var cloud = CloudSessions.Shared.Running();
+        if (cur.ValueKind != JsonValueKind.Object)
+            return cloud.Count > 0 ? cloud[0] with { BusyCount = cloud.Count } : null;
 
         var id = cur.TryGetProperty("sessionId", out var sid) ? sid.GetString() ?? "" : "";
         var tr = Transcript(id);
@@ -203,7 +225,7 @@ public sealed class ClaudeData
         if (string.IsNullOrWhiteSpace(name)) name = Path.GetFileName(cwd.TrimEnd('/', '\\'));
         if (string.IsNullOrWhiteSpace(name)) name = "Sitzung";
         var secs = (int)Math.Max(0, DateTimeOffset.UtcNow.ToUnixTimeSeconds() - Updated(cur) / 1000);
-        return new SessionInfo(name, secs, tr?.Plan.ToList() ?? [], tr?.LastPrompt, busy.Count);
+        return new SessionInfo(name, secs, tr?.Plan.ToList() ?? [], tr?.LastPrompt, busy.Count + cloud.Count);
     }
 
     readonly Dictionary<string, double> activeSince = [];
@@ -309,14 +331,14 @@ public sealed class ClaudeData
 
     const string ClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
     const string TokenUrl = "https://platform.claude.com/v1/oauth/token";
-    const string UserAgent = "ClaudeDisplay/1.0";
+    internal const string UserAgent = "ClaudeDisplay/1.0";
     static DateTime refreshRetryAfter = DateTime.MinValue;
 
     /// <summary>
     /// Zugangsschlüssel von Claude Code (Windows/Linux: ~/.claude/.credentials.json, macOS: Schlüsselbund).
     /// Läuft er ab, wird er wie von der CLI erneuert und in die Datei zurückgeschrieben.
     /// </summary>
-    static (string? token, string? why) AccessToken(bool force = false)
+    internal static (string? token, string? why) AccessToken(bool force = false)
     {
         try
         {

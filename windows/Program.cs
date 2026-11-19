@@ -12,6 +12,16 @@ static class Program
         // ClaudeDisplay --render-test datei.png  -> Beispielansichten zeichnen (zum Prüfen ohne Display)
         int i = Array.IndexOf(args, "--render-test");
         if (i >= 0 && i + 1 < args.Length) { RenderTest(args[i + 1]); return; }
+        if (args.Contains("--cloud-test"))
+        {
+            // Cloud-Abfrage prüfen; mit „bridge“ auch lokale Sitzungen mit Fernsteuerung
+            CloudSessions.Shared.IncludeBridge = args.Contains("bridge");
+            CloudSessions.Shared.Tick();
+            foreach (var x in CloudSessions.Shared.Running())
+                Console.WriteLine($"Sitzung: {x.Name} | Laufzeit {x.Secs} s | erledigt {x.Done} / {x.Plan.Count} | Schritt: {x.CurrentStep ?? "-"} | Eingabe: {(x.Prompt ?? "-")[..Math.Min(40, (x.Prompt ?? "-").Length)]}");
+            if (CloudSessions.Shared.Running().Count == 0) Console.WriteLine("keine laufende Cloud-Sitzung");
+            return;
+        }
         if (args.Contains("--usage-test")) { Console.WriteLine(new ClaudeData().GetUsage(true)?.ToString() ?? "kein Limit (siehe log.txt)"); return; }
 
         // nur eine Instanz pro Benutzer
