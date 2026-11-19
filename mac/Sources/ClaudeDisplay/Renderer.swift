@@ -109,22 +109,22 @@ final class Canvas {
         }
     }
 
-    /// Logo oben links im gewählten Stil; `tick` animiert es, solange gearbeitet wird.
-    func logo(_ style: LogoStyle, _ cx: CGFloat, _ cy: CGFloat, active: Bool, tick: Int) {
+    /// Logo im gewählten Stil; `tick` animiert es, solange gearbeitet wird. scale 1 = 18 px.
+    func logo(_ style: LogoStyle, _ cx: CGFloat, _ cy: CGFloat, scale k: CGFloat = 1, active: Bool, tick: Int) {
         let t = Palette.theme
         switch style {
         case .ring:
             if active {
                 let s = CGFloat((tick * 30) % 360)
-                gradientArc(cx, cy, 9, 3, s, s + 290, t.accent, t.accent2)
+                gradientArc(cx, cy, 9 * k, 3 * k, s, s + 290, t.accent, t.accent2)
             } else {
-                gradientArc(cx, cy, 9, 3, 0, 359.4, t.accent, t.accent2)
+                gradientArc(cx, cy, 9 * k, 3 * k, 0, 359.4, t.accent, t.accent2)
             }
         case .spark:
-            spark(cx, cy, 9.5, Palette.accent, angle: active ? CGFloat(tick * 15) : 0)
+            spark(cx, cy, 9.5 * k, Palette.accent, angle: active ? CGFloat(tick * 15) : 0)
         case .dot:
-            circle(cx, cy, active && tick % 2 == 0 ? 8 : 6.5, t.accent.mix(RGB(0, 0, 0), 0.7).ns)
-            circle(cx, cy, 4.5, Palette.accent)
+            circle(cx, cy, (active && tick % 2 == 0 ? 8 : 6.5) * k, t.accent.mix(RGB(0, 0, 0), 0.7).ns)
+            circle(cx, cy, 4.5 * k, Palette.accent)
         case .none:
             break
         }
@@ -233,13 +233,17 @@ enum Renderer {
 
     private static let lock = NSLock()
 
-    /// Zeichnet eine Ansicht im angegebenen Theme (Standard: Einstellungen).
+    /// Zeichnet eine Ansicht im angegebenen Theme und Layout (Standard: Einstellungen).
     static func render(session: SessionInfo?, usage: Usage?, tick: Int, now: Date = Date(),
-                       theme: DisplayTheme? = nil) -> Canvas {
+                       theme: DisplayTheme? = nil, layout: DisplayLayout? = nil) -> Canvas {
         lock.lock(); defer { lock.unlock() }
         Palette.theme = theme ?? AppSettings.shared.displayTheme
+        let l = layout ?? AppSettings.shared.displayLayout
         let c = Canvas()
-        if let session { active(c, session, usage, tick, now) } else { idle(c, usage, now) }
+        let data = WidgetData(session: session, usage: usage, tick: tick, now: now)
+        for item in (session != nil ? l.active : l.idle) where item.visible {
+            Widgets.draw(c, item, data)
+        }
         return c
     }
 
@@ -260,105 +264,8 @@ enum Renderer {
         let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: d)
     }
 
-    static func header(_ c: Canvas, _ now: Date, active: Bool, tick: Int, showClock: Bool) {
-        let t = Palette.theme
-        c.logo(t.logo, 17, 18, active: active, tick: tick)
-        let x: CGFloat = t.logo == .none ? 10 : 33
-        let f = roundedFont(16, 650)
-        c.text(x, 18, c.fit(t.title, f, (showClock ? 180 : 150) - x), f, Palette.text, v: .middle)
-        if showClock {
-            c.text(230, 18, clock(now), roundedFont(16, 560), Palette.muted, h: .right, v: .middle)
-        }
-    }
-
-    static func limits(_ c: Canvas, _ use: Usage?, _ now: Date) {
-        guard let use else {
-            c.text(120, 214, "Limit gerade nicht verfügbar", roundedFont(12, 500), Palette.dim, h: .center, v: .middle)
-            return
-        }
-        for (x0, x1, label, w) in [(CGFloat(10), CGFloat(114), "5 STD", use.five), (126, 230, "WOCHE", use.week)] {
-            c.spaced(x0, 188, label, roundedFont(10, 700), Palette.dim)
-            let col = Palette.forPct(w.pct)
-            let big = roundedFont(24, 700)
-            c.text(x0, 222, "\(w.pct)", big, col, v: .baseline)
-            c.text(x0 + c.tlen("\(w.pct)", big) + 1, 222, "%", roundedFont(13, 650), col, v: .baseline)
-            if let s = use.stale {
-                c.text(x1, 222, "Stand " + clock(s), roundedFont(11, 560), Palette.dim, h: .right, v: .baseline)
-            } else if let r = w.reset {
-                c.text(x1, 222, fmtReset(r.timeIntervalSince(now)), roundedFont(11, 560), Palette.muted, h: .right, v: .baseline)
-            }
-            c.bar(x0, 227, x1, 5, w.pct, col)
-        }
-    }
-
-    static func active(_ c: Canvas, _ s: SessionInfo, _ use: Usage?, _ tick: Int, _ now: Date) {
-        header(c, now, active: true, tick: tick, showClock: true)
-
-        // Fortschrittsring
-        let (cx, cy, r, w): (CGFloat, CGFloat, CGFloat, CGFloat) = (52, 84, 40, 8)
-        c.arc(cx, cy, r, w, 0, 360, Palette.track, caps: false)
-        if !s.plan.isEmpty {
-            let frac = CGFloat(s.done) / CGFloat(s.plan.count)
-            if frac > 0 {
-                c.gradientArc(cx, cy, r, w, 0, min(359.4, 360 * frac), Palette.theme.accent, Palette.theme.accent2)
-            }
-            c.text(cx, cy - 4, "\(s.done)", roundedFont(30, 700), Palette.text, h: .center, v: .middle)
-            c.text(cx, cy + 19, "von \(s.plan.count)", roundedFont(11, 600), Palette.muted, h: .center, v: .middle)
-        } else {
-            let start = CGFloat((tick * 40) % 360)
-            c.gradientArc(cx, cy, r, w, start, start + 80, Palette.theme.accent, Palette.theme.accent2)
-            c.text(cx, cy, "···", roundedFont(22, 700), Palette.muted, h: .center, v: .middle)
-        }
-
-        // Status, Name, Zeit
-        let x: CGFloat = 104
-        c.circle(x + 4, 51, tick % 2 == 0 ? 5.5 : 4.2, Palette.goodGlow)
-        c.circle(x + 4, 51, 3.4, Palette.good)
-        c.spaced(x + 13, 45, "ARBEITET" + (s.busyCount > 1 ? "  +\(s.busyCount - 1)" : ""), roundedFont(10, 700), Palette.good)
-        var y: CGFloat = 60
-        let nameFont = roundedFont(17, 680)
-        for line in c.wrap(s.name, nameFont, 240 - x - 10, 2) {
-            c.text(x, y, line, nameFont, Palette.text)
-            y += 21
-        }
-        c.text(x, max(y + 4, 104), fmtTimer(s.secs), roundedFont(15, 560), Palette.muted)
-
-        // Karte mit dem aktuellen Schritt
-        let step: String, col: NSColor, accent: NSColor
-        if !s.plan.isEmpty {
-            if let cur = s.currentStep { step = cur; col = Palette.text; accent = Palette.accent }
-            else { step = "Alle Schritte erledigt"; col = Palette.good; accent = Palette.good }
-        } else {
-            step = s.prompt ?? "Denkt nach …"; col = Palette.text; accent = Palette.accent
-        }
-        c.rrect(8, 134, 232, 178, 12, stroke: Palette.edge)
-        c.rrect(15, 143, 18.5, 169, 1.75, fill: accent)
-        let stepFont = roundedFont(15, 600)
-        let lines = c.wrap(step, stepFont, 240 - 44, 2)
-        var sy = 156 - CGFloat(lines.count - 1) * 9.5
-        for line in lines {
-            c.text(27, sy, line, stepFont, col, v: .middle)
-            sy += 19
-        }
-        limits(c, use, now)
-    }
-
-    static func idle(_ c: Canvas, _ use: Usage?, _ now: Date) {
-        header(c, now, active: false, tick: 0, showClock: false)
-        let rf = roundedFont(13, 600)
-        c.text(230, 18, "bereit", rf, Palette.dim, h: .right, v: .middle)
-        c.circle(230 - c.tlen("bereit", rf) - 8, 18, 3, Palette.good)
-
-        c.text(120, 76, clock(now), roundedFont(66, 330), Palette.text, h: .center, v: .middle)
+    static func dateText(_ now: Date) -> String {
         let cal = Calendar.current
-        let datum = "\(wochentage[cal.component(.weekday, from: now) - 1]), \(cal.component(.day, from: now)). \(monate[cal.component(.month, from: now) - 1])"
-        var size: CGFloat = 19
-        while size > 15 && c.tlen(datum, roundedFont(size, 600)) > 224 { size -= 1 }
-        c.text(120, 128, datum, roundedFont(size, 600), Palette.muted, h: .center, v: .middle)
-        let t = "Alles ruhig", tf = roundedFont(16, 620)
-        let pw = c.tlen(t, tf) / 2 + 20
-        c.rrect(120 - pw, 146, 120 + pw, 176, 15, stroke: Palette.edge)
-        c.text(120, 161, t, tf, Palette.muted, h: .center, v: .middle)
-        limits(c, use, now)
+        return "\(wochentage[cal.component(.weekday, from: now) - 1]), \(cal.component(.day, from: now)). \(monate[cal.component(.month, from: now) - 1])"
     }
 }

@@ -134,12 +134,17 @@ public static class Look
         new(new PixelSize(240, 240), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
 
     /// <summary>Display-Ansicht in einem Theme als Bild (für die Vorlagen-Auswahl).</summary>
-    public static Bitmap ThemePreview(DisplayTheme theme)
+    public static Bitmap ThemePreview(DisplayTheme theme) => Preview(theme, null);
+
+    /// <summary>Display-Ansicht in einem Layout als Bild (für die Layout-Vorlagen).</summary>
+    public static Bitmap LayoutPreview(DisplayLayout layout) => Preview(null, layout);
+
+    static Bitmap Preview(DisplayTheme? theme, DisplayLayout? layout)
     {
         var sess = new SessionInfo("Mein Projekt", 754,
             [new("a", "completed"), new("b", "completed"), new("Tests schreiben", "in_progress"), new("d", "pending")], null, 1);
         var use = new Usage(new(42, DateTime.UtcNow.AddHours(2)), new(67, DateTime.UtcNow.AddHours(47)), null);
-        using var c = Renderer.Render(sess, use, 3, theme);
+        using var c = Renderer.Render(sess, use, 3, theme, layout);
         using var img = SKImage.FromBitmap(c.Bitmap);
         using var data = img.Encode(SKEncodedImageFormat.Png, 100);
         return new Bitmap(new MemoryStream(data.ToArray()));

@@ -32,6 +32,8 @@ final class AppSettings {
     var appThemeId: String { didSet { d.set(appThemeId, forKey: "appThemeId") } }
     var displayCustom: DisplayTheme { didSet { save(displayCustom, "displayCustom") } }
     var appCustom: AppTheme { didSet { save(appCustom, "appCustom") } }
+    /// Aufbau des Displays (Layout-Editor)
+    var displayLayout: DisplayLayout { didSet { save(displayLayout, "displayLayout") } }
 
     var displayTheme: DisplayTheme {
         displayThemeId == "custom" ? displayCustom : Themes.preset(displayThemeId).display
@@ -66,6 +68,7 @@ final class AppSettings {
         appThemeId = d.string(forKey: "appThemeId") ?? "neon"
         displayCustom = AppSettings.load("displayCustom", d) ?? Themes.preset("neon").display
         appCustom = AppSettings.load("appCustom", d) ?? Themes.preset("neon").app
+        displayLayout = (AppSettings.load("displayLayout", d) as DisplayLayout?)?.normalized() ?? LayoutPresets.standard
         host = d.string(forKey: "host") ?? ""
         enabled = d.bool(forKey: "enabled")
         dayBrightness = d.double(forKey: "dayBrightness")

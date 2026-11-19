@@ -24,6 +24,8 @@ public sealed class AppSettings
     public string AppThemeId { get; set; } = "neon";
     public DisplayTheme DisplayCustom { get; set; } = Themes.Preset("neon").Display;
     public AppTheme AppCustom { get; set; } = Themes.Preset("neon").App;
+    /// <summary>Aufbau des Displays (Layout-Editor)</summary>
+    public DisplayLayout DisplayLayout { get; set; } = LayoutPresets.Standard;
 
     [System.Text.Json.Serialization.JsonIgnore]
     public DisplayTheme DisplayTheme => DisplayThemeId == "custom" ? DisplayCustom : Themes.Preset(DisplayThemeId).Display;
@@ -42,6 +44,7 @@ public sealed class AppSettings
         AppSettings s;
         try { s = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new(); }
         catch { s = new(); }
+        s.DisplayLayout = (s.DisplayLayout ?? LayoutPresets.Standard).Normalized();
         if (s.HostId < 2)
         {
             s.HostId = (uint)Random.Shared.NextInt64(2, uint.MaxValue);

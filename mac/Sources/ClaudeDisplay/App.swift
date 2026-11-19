@@ -64,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // das Menüleisten-Symbol kann hinter der Notch verschwinden.
                 if !Self.launchedAtLogin && !AppSettings.shared.windowMode { MainWindow.show() }
                 if args.contains("--show-settings") { SettingsWindow.show() }
+                if args.contains("--show-layout") { LayoutEditorWindow.show() }
             } else {
                 NSApp.setActivationPolicy(.regular)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { SetupWindow.show() }
@@ -74,6 +75,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
                 var views: [(String, AnyView)] = [("panel", AnyView(PanelView())),
                                                   ("dashboard", AnyView(DashboardView().frame(width: 960, height: 640))),
+                                                  ("layout", AnyView(LayoutEditorView(selected: "step").frame(width: 1060, height: 720))),
+                                                  ("layout-panel", AnyView(LayoutEditorView(selected: "step").panelContent.padding(20).frame(width: 370).background(NeonBackground()))),
+                                                  ("layout-panel-label", AnyView(LayoutEditorView(selected: "clock").panelContent.padding(20).frame(width: 370).background(NeonBackground()))),
+                                                  ("layout-idle", AnyView(LayoutEditorView(selected: "bigClock", screen: .idle).frame(width: 1060, height: 720))),
                                                   ("dashboard-right", AnyView(DashboardView().right.padding(28).frame(width: 600).background(NeonBackground())))]
                 for page in SettingsPage.allCases {
                     views.append(("page-\(page.rawValue)", AnyView(VStack(alignment: .leading, spacing: 18) { SettingsView.content(page) }

@@ -222,6 +222,19 @@ public sealed class SettingsWindow : Window
                 Note("Tipp: Dunkle Grautöne zeigt das Display heller als hier – Rahmen und Balken-Hintergrund lieber dunkel wählen.")));
         }
 
+        var layouts = new WrapPanel();
+        foreach (var p in LayoutPresets.All)
+            layouts.Children.Add(ThemeTile(p.Name, Look.LayoutPreview(p.Layout), s.DisplayLayout.SameAs(p.Layout.Normalized()), () =>
+            {
+                s.DisplayLayout = p.Layout.Normalized(); Changed();
+            }));
+        if (!LayoutPresets.All.Any(p => s.DisplayLayout.SameAs(p.Layout.Normalized())))
+            layouts.Children.Add(ThemeTile("Eigenes", Look.LayoutPreview(s.DisplayLayout), true, LayoutEditorWindow.Open));
+        stack.Children.Add(Card("Display – Layout", layouts,
+            new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = {
+                Look.NeonButton("Layout-Editor öffnen", LayoutEditorWindow.Open),
+                Note("Elemente frei verschieben, skalieren, ausblenden und eigene Texte hinzufügen.") } }));
+
         var chips = new WrapPanel();
         foreach (var p in Themes.Presets)
             chips.Children.Add(AppChip(p.Name, p.App, s.AppThemeId == p.Id, () => { s.AppThemeId = p.Id; Changed(); }));

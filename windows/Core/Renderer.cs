@@ -39,6 +39,7 @@ public sealed class Canvas : IDisposable
 
     public static SKFont Font(float size, int weight)
     {
+        size = MathF.Max(4, MathF.Round(size * 4) / 4);   // begrenzt den Schriften-Zwischenspeicher
         if (fonts.TryGetValue((size, weight), out var f)) return f;
         if (family == null)
         {
@@ -101,21 +102,21 @@ public sealed class Canvas : IDisposable
     }
 
     /// <summary>Logo oben links im gewählten Stil; tick animiert es während der Arbeit.</summary>
-    public void Logo(LogoStyle style, float cx, float cy, bool active, int tick)
+    public void Logo(LogoStyle style, float cx, float cy, bool active, int tick, float k = 1)
     {
         var t = Pal.Theme;
         switch (style)
         {
             case LogoStyle.Ring:
-                if (active) { float s = tick * 30 % 360; GradientArc(cx, cy, 9, 3, s, s + 290, t.Accent, t.Accent2); }
-                else GradientArc(cx, cy, 9, 3, 0, 359.4f, t.Accent, t.Accent2);
+                if (active) { float s = tick * 30 % 360; GradientArc(cx, cy, 9 * k, 3 * k, s, s + 290, t.Accent, t.Accent2); }
+                else GradientArc(cx, cy, 9 * k, 3 * k, 0, 359.4f, t.Accent, t.Accent2);
                 break;
             case LogoStyle.Spark:
-                Spark(cx, cy, 9.5f, Pal.Accent, active ? tick * 15 : 0);
+                Spark(cx, cy, 9.5f * k, Pal.Accent, active ? tick * 15 : 0);
                 break;
             case LogoStyle.Dot:
-                Circle(cx, cy, active && tick % 2 == 0 ? 8 : 6.5f, t.Accent.Mix(new RGB(0, 0, 0), 0.7).Sk);
-                Circle(cx, cy, 4.5f, Pal.Accent);
+                Circle(cx, cy, (active && tick % 2 == 0 ? 8 : 6.5f) * k, t.Accent.Mix(new RGB(0, 0, 0), 0.7).Sk);
+                Circle(cx, cy, 4.5f * k, Pal.Accent);
                 break;
         }
     }
@@ -216,22 +217,21 @@ public static class Renderer
 {
     static readonly string[] Wochentage = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
     static readonly string[] Monate = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"];
-    static SKFont F(float s, int w) => Canvas.Font(s, w);
-
     static readonly object renderLock = new();
 
-    /// <summary>Zeichnet eine Ansicht im angegebenen Theme (Standard: Einstellungen).</summary>
-    public static Canvas Render(SessionInfo? s, Usage? use, int tick, DisplayTheme? theme = null)
+    /// <summary>Zeichnet eine Ansicht im angegebenen Theme und Layout (Standard: Einstellungen).</summary>
+    public static Canvas Render(SessionInfo? s, Usage? use, int tick, DisplayTheme? theme = null, DisplayLayout? layout = null)
     {
-        lock (renderLock) { Pal.Theme = theme ?? AppSettings.Shared.DisplayTheme; return RenderLocked(s, use, tick); }
-    }
-
-    static Canvas RenderLocked(SessionInfo? s, Usage? use, int tick)
-    {
-        var c = new Canvas();
-        var now = DateTime.Now;
-        if (s != null) Active(c, s, use, tick, now); else Idle(c, use, now);
-        return c;
+        lock (renderLock)
+        {
+            Pal.Theme = theme ?? AppSettings.Shared.DisplayTheme;
+            var l = layout ?? AppSettings.Shared.DisplayLayout;
+            var c = new Canvas();
+            var d = new WidgetData(s, use, tick, DateTime.Now);
+            foreach (var item in (s != null ? l.Active : l.Idle).ToArray())
+                if (item.Visible) Widgets.Draw(c, item, d);
+            return c;
+        }
     }
 
     public static string FmtReset(TimeSpan t)
@@ -245,104 +245,5 @@ public static class Renderer
 
     public static string FmtTimer(int s) => s >= 3600 ? $"{s / 3600}:{s / 60 % 60:00} h" : $"{s / 60}:{s % 60:00}";
 
-    static void Header(Canvas c, DateTime now, bool active, int tick, bool showClock)
-    {
-        var t = Pal.Theme;
-        c.Logo(t.Logo, 17, 18, active, tick);
-        float tx = t.Logo == LogoStyle.None ? 10 : 33;
-        var tf = F(16, 650);
-        c.Text(tx, 18, c.Fit(t.Title, tf, (showClock ? 180 : 150) - tx), tf, Pal.Text, v: Canvas.V.Middle);
-        if (showClock) c.Text(230, 18, now.ToString("HH:mm"), F(16, 560), Pal.Muted, Canvas.H.Right, Canvas.V.Middle);
-    }
-
-    static void Limits(Canvas c, Usage? use, DateTime now)
-    {
-        if (use == null)
-        {
-            c.Text(120, 214, "Limit gerade nicht verfügbar", F(12, 500), Pal.Dim, Canvas.H.Center, Canvas.V.Middle);
-            return;
-        }
-        foreach (var (x0, x1, label, w) in new[] { (10f, 114f, "5 STD", use.Five), (126f, 230f, "WOCHE", use.Week) })
-        {
-            c.Spaced(x0, 188, label, F(10, 700), Pal.Dim);
-            var col = Pal.ForPct(w.Pct);
-            var big = F(24, 700);
-            c.Text(x0, 222, w.Pct.ToString(), big, col, v: Canvas.V.Baseline);
-            c.Text(x0 + c.TLen(w.Pct.ToString(), big) + 1, 222, "%", F(13, 650), col, v: Canvas.V.Baseline);
-            if (use.Stale is { } st)
-                c.Text(x1, 222, "Stand " + st.ToString("HH:mm"), F(11, 560), Pal.Dim, Canvas.H.Right, Canvas.V.Baseline);
-            else if (w.Reset is { } r)
-                c.Text(x1, 222, FmtReset(r - DateTime.UtcNow), F(11, 560), Pal.Muted, Canvas.H.Right, Canvas.V.Baseline);
-            c.Bar(x0, 227, x1, 5, w.Pct, col);
-        }
-    }
-
-    static void Active(Canvas c, SessionInfo s, Usage? use, int tick, DateTime now)
-    {
-        Header(c, now, true, tick, true);
-
-        // Fortschrittsring
-        const float cx = 52, cy = 84, r = 40, w = 8;
-        c.Arc(cx, cy, r, w, 0, 360, Pal.Track, caps: false);
-        if (s.Plan.Count > 0)
-        {
-            float frac = (float)s.Done / s.Plan.Count;
-            if (frac > 0) c.GradientArc(cx, cy, r, w, 0, Math.Min(359.4f, 360 * frac), Pal.Theme.Accent, Pal.Theme.Accent2);
-            c.Text(cx, cy - 4, s.Done.ToString(), F(30, 700), Pal.Text, Canvas.H.Center, Canvas.V.Middle);
-            c.Text(cx, cy + 19, $"von {s.Plan.Count}", F(11, 600), Pal.Muted, Canvas.H.Center, Canvas.V.Middle);
-        }
-        else
-        {
-            float start = tick * 40 % 360;
-            c.GradientArc(cx, cy, r, w, start, start + 80, Pal.Theme.Accent, Pal.Theme.Accent2);
-            c.Text(cx, cy, "···", F(22, 700), Pal.Muted, Canvas.H.Center, Canvas.V.Middle);
-        }
-
-        // Status, Name, Zeit
-        const float x = 104;
-        c.Circle(x + 4, 51, tick % 2 == 0 ? 5.5f : 4.2f, Pal.GoodGlow);
-        c.Circle(x + 4, 51, 3.4f, Pal.Good);
-        c.Spaced(x + 13, 45, "ARBEITET" + (s.BusyCount > 1 ? $"  +{s.BusyCount - 1}" : ""), F(10, 700), Pal.Good);
-        float y = 60;
-        var nameFont = F(17, 680);
-        foreach (var line in c.Wrap(s.Name, nameFont, 240 - x - 10, 2)) { c.Text(x, y, line, nameFont, Pal.Text); y += 21; }
-        c.Text(x, Math.Max(y + 4, 104), FmtTimer(s.Secs), F(15, 560), Pal.Muted);
-
-        // Karte mit dem aktuellen Schritt
-        string step; SKColor col, accent;
-        if (s.Plan.Count > 0)
-        {
-            if (s.CurrentStep is { } cur) { step = cur; col = Pal.Text; accent = Pal.Accent; }
-            else { step = "Alle Schritte erledigt"; col = Pal.Good; accent = Pal.Good; }
-        }
-        else { step = s.Prompt ?? "Denkt nach …"; col = Pal.Text; accent = Pal.Accent; }
-        c.RRect(8, 134, 232, 178, 12, stroke: Pal.Edge);
-        c.RRect(15, 143, 18.5f, 169, 1.75f, fill: accent);
-        var stepFont = F(15, 600);
-        var lines = c.Wrap(step, stepFont, 240 - 44, 2);
-        float sy = 156 - (lines.Count - 1) * 9.5f;
-        foreach (var line in lines) { c.Text(27, sy, line, stepFont, col, v: Canvas.V.Middle); sy += 19; }
-
-        Limits(c, use, now);
-    }
-
-    static void Idle(Canvas c, Usage? use, DateTime now)
-    {
-        Header(c, now, false, 0, false);
-        var rf = F(13, 600);
-        c.Text(230, 18, "bereit", rf, Pal.Dim, Canvas.H.Right, Canvas.V.Middle);
-        c.Circle(230 - c.TLen("bereit", rf) - 8, 18, 3, Pal.Good);
-
-        c.Text(120, 76, now.ToString("HH:mm"), F(66, 330), Pal.Text, Canvas.H.Center, Canvas.V.Middle);
-        var datum = $"{Wochentage[(int)now.DayOfWeek]}, {now.Day}. {Monate[now.Month - 1]}";
-        float size = 19;
-        while (size > 15 && c.TLen(datum, F(size, 600)) > 224) size--;
-        c.Text(120, 128, datum, F(size, 600), Pal.Muted, Canvas.H.Center, Canvas.V.Middle);
-        var tf = F(16, 620);
-        float pw = c.TLen("Alles ruhig", tf) / 2 + 20;
-        c.RRect(120 - pw, 146, 120 + pw, 176, 15, stroke: Pal.Edge);
-        c.Text(120, 161, "Alles ruhig", tf, Pal.Muted, Canvas.H.Center, Canvas.V.Middle);
-
-        Limits(c, use, now);
-    }
+    public static string DateText(DateTime now) => $"{Wochentage[(int)now.DayOfWeek]}, {now.Day}. {Monate[now.Month - 1]}";
 }

@@ -14,6 +14,7 @@
 - **Mac und PC gleichzeitig** – der Rechner mit aktiver Sitzung bekommt das Display
 - **Einrichtungs-Assistent** – findet das Display im WLAN, spielt bei neuen Geräten die Firmware auf, verbindet dein Claude-Konto
 - **Frei gestaltbar** – Vorlagen (Neon, Claude, Aurora, Sunset, Mono) oder eigene Farben, Logo und Titel – getrennt für App und Display
+- **Layout-Editor** – jedes Element auf dem Display frei verschieben, in der Größe ändern, ausblenden oder eigene Texte und Linien hinzufügen; mit Vorlagen (Standard, Fokus, Limits groß, Groß), Hilfslinien und Rückgängig
 - **Menüleiste oder Fenster** – unauffällig in der Menüleiste/im Infobereich oder als App mit Dashboard
 - **Updates über GitHub** – App und Display-Firmware lassen sich direkt in der App aktualisieren
 - **Nachtmodus** – dimmt automatisch, auch wenn kein Rechner läuft

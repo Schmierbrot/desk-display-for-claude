@@ -87,6 +87,9 @@ public sealed class App : Application
                     Snapshot(panel, prefix + "-panel.png");
                     if (settings != null) Snapshot(settings, prefix + "-settings.png");
                     if (setup != null) Snapshot(setup, prefix + "-setup.png");
+                    var le = new ClaudeDisplay.UI.LayoutEditorWindow("step"); le.Show();
+                    var li = new ClaudeDisplay.UI.LayoutEditorWindow("bigclock", idleView: true); li.Show();
+                    Avalonia.Threading.DispatcherTimer.RunOnce(() => { Snapshot(le, prefix + "-layout.png"); Snapshot(li, prefix + "-layout-idle.png"); le.Close(); li.Close(); }, TimeSpan.FromSeconds(1));
                     main.Show();
                     Avalonia.Threading.DispatcherTimer.RunOnce(() => { Snapshot(main, prefix + "-main.png"); Quit(); }, TimeSpan.FromSeconds(1.5));
                 }, TimeSpan.FromSeconds(7));

@@ -359,6 +359,21 @@ struct AppearancePage: View {
         }
         if settings.displayThemeId == "custom" { displayEditor }
 
+        Card(title: "Display – Layout") {
+            HStack(spacing: 14) {
+                ForEach(LayoutPresets.all) { p in layoutTile(p) }
+                if !LayoutPresets.all.contains(where: { $0.layout == settings.displayLayout }) {
+                    layoutTile(LayoutPreset(id: "custom", name: "Eigenes", layout: settings.displayLayout))
+                }
+            }
+            HStack(spacing: 12) {
+                Button { LayoutEditorWindow.show() } label: { Label("Layout-Editor öffnen", systemImage: "rectangle.3.group") }
+                    .buttonStyle(NeonButtonStyle())
+                Text("Elemente frei verschieben, skalieren, ausblenden und eigene Texte hinzufügen.")
+                    .font(DS.font(11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+
         Card(title: "App – Farben") {
             HStack(spacing: 12) {
                 ForEach(Themes.presets) { p in appChip(id: p.id, name: p.name, theme: p.app) }
@@ -409,6 +424,25 @@ struct AppearancePage: View {
             Text("Tipp: Dunkle Grautöne zeigt das Display heller als hier – Rahmen und Balken-Hintergrund lieber dunkel wählen.")
                 .font(DS.font(11)).foregroundStyle(.secondary)
         }
+    }
+
+    private func layoutTile(_ p: LayoutPreset) -> some View {
+        let selected = settings.displayLayout == p.layout
+        return Button {
+            if p.id == "custom" { LayoutEditorWindow.show() } else { settings.displayLayout = p.layout }
+        } label: {
+            VStack(spacing: 8) {
+                Image(decorative: Renderer.render(session: Sample.session, usage: Sample.usage, tick: 3, layout: p.layout).image, scale: 1)
+                    .resizable().interpolation(.high)
+                    .frame(width: 112, height: 112)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(selected ? AnyShapeStyle(settings.appTheme.gradient) : AnyShapeStyle(Color.white.opacity(0.1)),
+                                      lineWidth: selected ? 2.5 : 1))
+                Text(p.name).font(DS.font(12, selected ? .bold : .medium))
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private func colorRow(_ label: String, _ c: Binding<RGB>) -> some View {
