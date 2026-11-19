@@ -226,7 +226,7 @@ enum SetupWindow {
                              styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
             w.titlebarAppearsTransparent = true
             w.titleVisibility = .hidden
-            w.isMovableByWindowBackground = true
+            w.isMovableByWindowBackground = false   // nur oben an der Titelleiste verschieben – sonst zieht jedes Ziehen im Fenster mit
             w.isReleasedWhenClosed = false
             w.contentView = FullWindowHost.make(SetupView(model: SetupModel()))
             w.backgroundColor = AppSettings.shared.appTheme.background.ns

@@ -23,7 +23,7 @@ final class HostedWindow {
             let w = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: style, backing: .buffered, defer: false)
             w.titlebarAppearsTransparent = true
             w.titleVisibility = .hidden
-            w.isMovableByWindowBackground = true
+            w.isMovableByWindowBackground = false   // nur oben an der Titelleiste verschieben – sonst zieht jedes Ziehen im Fenster mit
             w.isReleasedWhenClosed = false
             w.appearance = NSAppearance(named: .darkAqua)
             w.contentView = FullWindowHost.make(content())
@@ -52,7 +52,34 @@ enum FullWindowHost {
         let host = NSHostingView(rootView: AnyView(view.frame(maxWidth: .infinity, maxHeight: .infinity)))
         host.sizingOptions = []
         host.autoresizingMask = [.width, .height]
+        // Unsichtbarer Streifen oben (anstelle der ausgeblendeten Titelleiste) zum Verschieben.
+        let drag = TitleDragView(frame: .zero)
+        drag.autoresizingMask = [.width]
+        host.addSubview(drag)
         return host
+    }
+}
+
+/// Fenster nur hier oben verschieben – ziehen woanders (z. B. im Layout-Editor) bewegt das Fenster nicht.
+final class TitleDragView: NSView {
+    static let height: CGFloat = 28
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func viewDidMoveToSuperview() { place() }
+    override func resize(withOldSuperviewSize oldSize: NSSize) { place() }
+    /// immer ganz oben, über die volle Breite
+    private func place() {
+        guard let s = superview else { return }
+        frame = NSRect(x: 0, y: s.isFlipped ? 0 : s.bounds.height - Self.height, width: s.bounds.width, height: Self.height)
+    }
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            // Doppelklick wie bei einer normalen Titelleiste (Systemeinstellung: Zoomen oder Ablegen)
+            let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
+            if action == "Minimize" { window?.performMiniaturize(nil) }
+            else if window?.styleMask.contains(.resizable) == true { window?.performZoom(nil) }
+            return
+        }
+        window?.performDrag(with: event)
     }
 }
 
