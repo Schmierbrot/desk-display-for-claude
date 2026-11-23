@@ -20,6 +20,8 @@ final class AppSettings {
     /// "menubar" = nur Menüleiste, "window" = App-Fenster mit Dock-Symbol
     var appMode: String { didSet { d.set(appMode, forKey: "appMode") } }
     var autoUpdate: Bool { didSet { d.set(autoUpdate, forKey: "autoUpdate") } }
+    /// Schriftgröße der App: 0,9 klein · 1 normal · 1,15 groß · 1,3 sehr groß
+    var textScale: Double { didSet { d.set(textScale, forKey: "textScale"); HostedWindow.rescaleAll() } }
     var windowMode: Bool { appMode == "window" }
     /// für MenuBarExtra(isInserted:) – nur im Menüleisten-Modus sichtbar
     var menuBarShown: Bool {
@@ -59,10 +61,12 @@ final class AppSettings {
             "dayBrightness": 60.0, "nightBrightness": 8.0,
             "nightMode": true, "nightStart": 22, "nightEnd": 7, "liveUsage": true, "cloudSessions": true,
             "displayThemeId": "neon", "appThemeId": "neon",
-            "appMode": "menubar", "autoUpdate": true,
+            "appMode": "menubar", "autoUpdate": true, "textScale": 1.0,
         ])
         appMode = d.string(forKey: "appMode") ?? "menubar"
         autoUpdate = d.bool(forKey: "autoUpdate")
+        let ts = d.double(forKey: "textScale")    // auf die nächste Stufe runden
+        textScale = [0.9, 1.0, 1.15, 1.3].min { abs($0 - ts) < abs($1 - ts) } ?? 1.0
         // Wer schon eine Display-Adresse gespeichert hat, braucht den Assistenten nicht
         let stored = d.persistentDomain(forName: Bundle.main.bundleIdentifier ?? "") ?? [:]
         setupDone = stored["setupDone"] as? Bool ?? !((stored["host"] as? String) ?? "").isEmpty

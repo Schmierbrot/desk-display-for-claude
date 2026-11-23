@@ -48,6 +48,9 @@ final class DisplayClient {
         fd = -1; last = nil; owner = false
     }
 
+    /// Beim nächsten Mal das ganze Bild schicken (Selbstkorrektur, falls unterwegs etwas verloren ging)
+    func forceFullFrame() { last = nil }
+
     // MARK: Pixel
 
     func push(rgb: [UInt8], priority: UInt8) throws -> PushResult {
@@ -151,11 +154,19 @@ final class DisplayClient {
         var one: Int32 = 1
         setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, socklen_t(MemoryLayout<Int32>.size))
         setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
-        guard Darwin.connect(s, ai.pointee.ai_addr, ai.pointee.ai_addrlen) == 0 else {
-            let e = errno
-            Darwin.close(s)
-            throw DisplayError.connect(e)
+        // Verbinden mit Zeitlimit (3 s) – ohne würde ein ausgeschaltetes Display den Takt bis zu 75 s blockieren
+        let flags = fcntl(s, F_GETFL, 0)
+        _ = fcntl(s, F_SETFL, flags | O_NONBLOCK)
+        if Darwin.connect(s, ai.pointee.ai_addr, ai.pointee.ai_addrlen) != 0 {
+            guard errno == EINPROGRESS else { let e = errno; Darwin.close(s); throw DisplayError.connect(e) }
+            var pfd = pollfd(fd: s, events: Int16(POLLOUT), revents: 0)
+            let r = poll(&pfd, 1, 3000)
+            var err: Int32 = 0
+            var len = socklen_t(MemoryLayout<Int32>.size)
+            getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &len)
+            guard r == 1, err == 0 else { Darwin.close(s); throw DisplayError.connect(r == 0 ? ETIMEDOUT : err) }
         }
+        _ = fcntl(s, F_SETFL, flags)
         fd = s; last = nil; owner = false
     }
 

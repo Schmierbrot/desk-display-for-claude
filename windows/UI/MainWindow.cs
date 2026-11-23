@@ -28,7 +28,7 @@ public sealed class MainWindow : Window
         this.openSettings = openSettings; this.openSetup = openSetup; this.shutdown = shutdown;
         Title = "Claude Display";
         Icon = Look.AppIcon;
-        Width = 980; Height = 660; MinWidth = 900; MinHeight = 600;
+        Look.Size(this, 980, 660, 900, 600);
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         // Schließen versteckt nur – die App läuft im Infobereich weiter
         Closing += (_, e) => { if (!AllowClose) { e.Cancel = true; Hide(); } };

@@ -85,8 +85,40 @@ public static class Look
                 GradientStops = { new GradientStop(Color.FromArgb(52, Accent2.R, Accent2.G, Accent2.B), 0), new GradientStop(Colors.Transparent, 1) },
             },
         });
-        g.Children.Add(content);
+        // Schriftgröße der App: der ganze Inhalt wird gleichmäßig skaliert (Schrift, Bedienelemente, Abstände)
+        g.Children.Add(Math.Abs(Scale - 1) < 0.01 ? content
+            : new LayoutTransformControl { LayoutTransform = new ScaleTransform(Scale, Scale), Child = content });
         return g;
+    }
+
+    /// <summary>Schriftgröße der App: 0,9 klein · 1 normal · 1,15 groß · 1,3 sehr groß</summary>
+    public static double Scale => AppSettings.Shared.TextScale;
+
+    static readonly List<(WeakReference<Window> w, double width, double? height, double? minW, double? minH)> sized = [];
+
+    /// <summary>Fenstergröße passend zur Schriftgröße setzen (und bei Änderung nachführen).</summary>
+    /// <param name="track">false für Fenster, die ihren Inhalt nicht neu aufbauen – sie gelten bis zum nächsten Öffnen.</param>
+    public static void Size(Window w, double width, double? height = null, double? minW = null, double? minH = null, bool track = true)
+    {
+        if (track) sized.Add((new WeakReference<Window>(w), width, height, minW, minH));
+        Apply(w, width, height, minW, minH);
+    }
+
+    static void Apply(Window w, double width, double? height, double? minW, double? minH)
+    {
+        double k = Scale;
+        if (minW is { } mw) w.MinWidth = mw * k;
+        if (minH is { } mh) w.MinHeight = mh * k;
+        w.Width = width * k;
+        if (height is { } h) w.Height = h * k;
+    }
+
+    /// <summary>Nach Änderung der Schriftgröße alle Fenster anpassen.</summary>
+    public static void ApplySizes()
+    {
+        sized.RemoveAll(x => !x.w.TryGetTarget(out _));
+        foreach (var (wr, width, height, minW, minH) in sized)
+            if (wr.TryGetTarget(out var w)) Apply(w, width, height, minW, minH);
     }
 
     public static Button NeonButton(string text, Action click, bool prominent = true)

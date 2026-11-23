@@ -4,9 +4,16 @@ import SwiftUI
 enum DS {
     static var theme: AppTheme { AppSettings.shared.appTheme }
     static let radius: CGFloat = 14
+    /// Schriftgröße der App (Einstellungen → Allgemein): 0,9 … 1,3
+    static var scale: CGFloat { CGFloat(AppSettings.shared.textScale) }
     static func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .rounded)
+        .system(size: size * scale, weight: weight, design: .rounded)
     }
+    static func sys(size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default) -> Font {
+        .system(size: size * scale, weight: weight, design: design)
+    }
+    /// Feste Breiten wachsen mit der Schrift mit
+    static func w(_ v: CGFloat) -> CGFloat { (v * scale).rounded() }
 }
 
 /// Hintergrund: tiefe Grundfarbe mit zwei weichen Leuchtflecken in den Akzentfarben.
@@ -163,7 +170,7 @@ struct IconButton: View {
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemName).font(.system(size: 13, weight: .semibold))
+            Image(systemName: systemName).font(DS.sys(size: 13, weight: .semibold))
                 .frame(width: 30, height: 30)
                 .background(Circle().fill(.white.opacity(0.07)))
                 .overlay(Circle().strokeBorder(.white.opacity(0.12), lineWidth: 0.8))
@@ -178,5 +185,14 @@ struct SectionLabel: View {
     let text: String
     var body: some View {
         Text(text.uppercased()).font(DS.font(10.5, .bold)).tracking(1.2).foregroundStyle(.secondary)
+    }
+}
+
+extension View {
+    /// Grundschrift und Größe der Bedienelemente passend zur eingestellten Schriftgröße
+    func appTextScale() -> some View {
+        let s = DS.scale
+        return self.font(DS.font(13))
+            .controlSize(s >= 1.25 ? .large : s <= 0.92 ? .small : .regular)
     }
 }

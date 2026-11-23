@@ -28,7 +28,7 @@ WiFiServer pixServer(7777);
 
 #define BL_PIN 5          // Hintergrundlicht, active-low
 #define AP_NAME "Claude-Display-Setup"
-#define FW_VERSION "1.0"
+#define FW_VERSION "1.1"
 
 ESP8266WebServer web(80);
 ESP8266HTTPUpdateServer updater;
@@ -304,7 +304,9 @@ void handleTheme() {
 // Ein neuer Besitzer muss mit einem Vollbild beginnen.
 #define MAX_CLIENTS 3
 #define LEASE_MS 5000
+#define CLIENT_IDLE_MS 20000   // Rechner schicken jede Sekunde etwas – länger Stille = tote Verbindung
 WiFiClient clients[MAX_CLIENTS];
+uint32_t clientSeen[MAX_CLIENTS];
 
 // liest genau n Bytes oder bricht nach Timeout ab
 bool readExact(WiFiClient &c, uint8_t *dst, size_t n) {
@@ -397,16 +399,44 @@ void serveClient(WiFiClient &c) {
 }
 
 void handlePixels() {
+  uint32_t now = millis();
+  // Verbindungen, die abgerissen sind, ohne dass es das Display merkt (Rechner
+  // schläft, WLAN weg), würden sonst die Plätze dauerhaft belegen.
+  for (int i = 0; i < MAX_CLIENTS; i++)
+    if (clients[i] && clients[i].connected() && now - clientSeen[i] > CLIENT_IDLE_MS) clients[i].stop();
   WiFiClient n = pixServer.accept();
   if (n) {
     n.setNoDelay(true);
+    n.keepAlive(10, 5, 3);     // tote Gegenstelle nach etwa 25 s erkennen
     int slot = -1;
     for (int i = 0; i < MAX_CLIENTS; i++)
       if (!clients[i] || !clients[i].connected()) { slot = i; break; }
-    if (slot < 0) n.stop(); else clients[slot] = n;
+    if (slot < 0) {
+      // alles belegt: die am längsten stille Verbindung weicht – der Neue ist sicher lebendig
+      slot = 0;
+      for (int i = 1; i < MAX_CLIENTS; i++)
+        if (now - clientSeen[i] > now - clientSeen[slot]) slot = i;
+      clients[slot].stop();
+    }
+    clients[slot] = n;
+    clientSeen[slot] = now;
   }
   for (int i = 0; i < MAX_CLIENTS; i++)
-    if (clients[i] && clients[i].connected()) serveClient(clients[i]);
+    if (clients[i] && clients[i].connected()) {
+      if (clients[i].available() > 0) clientSeen[i] = millis();
+      serveClient(clients[i]);
+    }
+}
+
+// WLAN-Wächter: das ESP verbindet sich meist selbst neu; hängt es trotzdem, nachhelfen
+uint32_t wifiLostMs = 0;
+bool wifiKicked = false;
+void watchWifi() {
+  if (WiFi.status() == WL_CONNECTED) { wifiLostMs = 0; wifiKicked = false; return; }
+  uint32_t now = millis();
+  if (!wifiLostMs) { wifiLostMs = now; return; }
+  if (!wifiKicked && now - wifiLostMs > 30000) { WiFi.reconnect(); wifiKicked = true; }
+  if (now - wifiLostMs > 300000) ESP.restart();   // 5 Minuten ohne WLAN: sauber neu starten
 }
 #endif
 
@@ -443,6 +473,9 @@ void setup() {
     showStatus("WLAN einrichten:", AP_NAME);
   });
   if (!wm.autoConnect(AP_NAME)) ESP.restart();
+  // Kein WLAN-Stromsparen: sonst kommen Bilder verzögert an oder Verbindungen reißen ab
+  WiFi.setSleepMode(WIFI_NONE_SLEEP);
+  WiFi.setAutoReconnect(true);
 
   MDNS.begin("claude-display");
 #ifndef STAGE_MINIMAL
@@ -473,5 +506,6 @@ void loop() {
 #ifndef STAGE_MINIMAL
   handlePixels();
   handleStandalone();
+  watchWifi();
 #endif
 }

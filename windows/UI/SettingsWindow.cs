@@ -34,7 +34,7 @@ public sealed class SettingsWindow : Window
         this.openSetup = openSetup; this.shutdown = shutdown; this.applyMode = applyMode;
         Title = "Claude Display – Einstellungen";
         Icon = Look.AppIcon;
-        Width = 820; Height = 580;
+        Look.Size(this, 820, 580);
         CanResize = false;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         onState = s => Dispatcher.UIThread.Post(() => Apply(s));
@@ -512,6 +512,7 @@ public sealed class SettingsWindow : Window
             Children =
             {
                 Card("Darstellung der App", modes),
+                Card("Schriftgröße", TextSizeButtons(), Note("Gilt für alle Fenster der App. Die Schrift auf dem Display stellst du im Layout-Editor ein.")),
                 Card("Start", Row("Mit Windows starten", auto)),
                 Card("Über",
                     Row("Version", Look.Tx(Updater.AppVersion, 13, color: Look.Secondary)),
@@ -522,6 +523,27 @@ public sealed class SettingsWindow : Window
     }
 
     /// <summary>Auswahlkarte: Infobereich oder App-Fenster</summary>
+    static Control TextSizeButtons()
+    {
+        var s = AppSettings.Shared;
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        foreach (var (v, name) in new[] { (0.9, "Klein"), (1.0, "Normal"), (1.15, "Groß"), (1.3, "Sehr groß") })
+        {
+            bool on = Math.Abs(s.TextScale - v) < 0.01;
+            var b = new Button { Content = name, Padding = new Thickness(16, 7), CornerRadius = new CornerRadius(9), BorderThickness = new Thickness(0),
+                Background = on ? Look.AccentGradient : Look.B(Colors.White, 0.07), FontWeight = on ? FontWeight.SemiBold : FontWeight.Normal };
+            b.Click += (_, _) =>
+            {
+                if (Math.Abs(s.TextScale - v) < 0.01) return;
+                s.TextScale = v; s.Save();
+                Look.ApplySizes();
+                Look.NotifyChanged();    // alle Fenster bauen sich neu auf
+            };
+            row.Children.Add(b);
+        }
+        return row;
+    }
+
     public static Control ModeCard(string mode, bool selected, Action click)
     {
         bool win = mode == "window";

@@ -338,7 +338,15 @@ public sealed class ClaudeData
     /// Zugangsschlüssel von Claude Code (Windows/Linux: ~/.claude/.credentials.json, macOS: Schlüsselbund).
     /// Läuft er ab, wird er wie von der CLI erneuert und in die Datei zurückgeschrieben.
     /// </summary>
+    /// <summary>Limit und Cloud-Sitzungen laufen auf verschiedenen Threads – erneuert wird nur einmal gleichzeitig.</summary>
+    static readonly object refreshGate = new();
+
     internal static (string? token, string? why) AccessToken(bool force = false)
+    {
+        lock (refreshGate) return AccessTokenLocked(force);
+    }
+
+    static (string? token, string? why) AccessTokenLocked(bool force)
     {
         try
         {
@@ -380,6 +388,15 @@ public sealed class ClaudeData
             var text = resp.Content.ReadAsStringAsync().Result;
             if (!resp.IsSuccessStatusCode)
             {
+                // Hat Claude Code den Login gerade selbst erneuert? Dann den neuen nehmen.
+                try
+                {
+                    var o2 = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(file))!["claudeAiOauth"]!;
+                    var t2 = o2["accessToken"]?.GetValue<string>();
+                    double.TryParse(o2["expiresAt"]?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var e2);
+                    if (t2 != null && t2 != token && DateTimeOffset.FromUnixTimeMilliseconds((long)e2) > DateTimeOffset.UtcNow.AddMinutes(1)) return (t2, null);
+                }
+                catch { }
                 refreshRetryAfter = DateTime.UtcNow.AddMinutes((int)resp.StatusCode == 400 ? 10 : 2);
                 Log.Write($"Login-Erneuerung fehlgeschlagen: HTTP {(int)resp.StatusCode} {text[..Math.Min(120, text.Length)]}");
                 return (null, (int)resp.StatusCode == 400 ? "Login ungültig – bitte in Claude Code neu anmelden" : $"Login-Erneuerung: HTTP {(int)resp.StatusCode}");

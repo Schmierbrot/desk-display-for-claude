@@ -398,8 +398,12 @@ enum ClaudeLogin {
     static let tokenURL = URL(string: "https://platform.claude.com/v1/oauth/token")!
     static let userAgent = "ClaudeDisplay/1.0"
     private static var retryAfter = Date.distantPast
+    /// Nutzungslimit und Cloud-Sitzungen laufen auf verschiedenen Threads – erneuert wird
+    /// immer nur einmal gleichzeitig, sonst macht der zweite Versuch den neuen Login ungültig.
+    private static let refreshLock = NSRecursiveLock()
 
     static func accessToken(force: Bool = false) -> Result<String, LoginError> {
+        refreshLock.lock(); defer { refreshLock.unlock() }
         guard var creds = read(), var oauth = creds["claudeAiOauth"] as? [String: Any],
               let token = oauth["accessToken"] as? String else {
             return .failure(LoginError(message: "kein Claude-Code-Login im Schlüsselbund (einmal `claude auth login`)"))
@@ -428,6 +432,11 @@ enum ClaudeLogin {
         }
         guard http.statusCode == 200, let d = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let newToken = d["access_token"] as? String, let expiresIn = d["expires_in"] as? Double else {
+            // Hat Claude Code den Login gerade selbst erneuert? Dann den neuen nehmen.
+            if let c = read(), let o = c["claudeAiOauth"] as? [String: Any], let t = o["accessToken"] as? String, t != token,
+               (o["expiresAt"] as? Double ?? 0) / 1000 - Date().timeIntervalSince1970 > 60 {
+                return .success(t)
+            }
             // vielleicht hat die CLI gerade selbst erneuert – beim nächsten Mal neu lesen
             retryAfter = Date().addingTimeInterval(http.statusCode == 400 ? 600 : 120)
             let body = String(data: data, encoding: .utf8) ?? ""

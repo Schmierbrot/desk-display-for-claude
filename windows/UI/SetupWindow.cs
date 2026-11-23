@@ -33,7 +33,7 @@ public sealed class SetupWindow : Window
         Closed += (_, _) => ClaudeConnect.Shared.Changed -= rebuild;
         Title = "Claude Display – Einrichtung";
         Icon = Look.AppIcon;
-        Width = 780; Height = 580;
+        Look.Size(this, 780, 580, track: false);
         CanResize = false;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Closed += (_, _) => waitCts?.Cancel();

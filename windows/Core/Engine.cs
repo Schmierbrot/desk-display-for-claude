@@ -30,7 +30,8 @@ public sealed class Engine
     int tick, busy;
     int? lastBrightness;
     DisplayTheme? lastTheme;
-    DateTime lastInfo = DateTime.MinValue, backoffUntil = DateTime.MinValue;
+    DateTime lastInfo = DateTime.MinValue, backoffUntil = DateTime.MinValue, lastFull = DateTime.MinValue;
+    int failures;
     DeviceInfo? device;
     volatile bool paused;
 
@@ -45,7 +46,7 @@ public sealed class Engine
     /// <summary>Nach Änderungen an Helligkeit/Adresse sofort neu anwenden.</summary>
     public void SettingsChanged()
     {
-        lock (gate) { lastBrightness = null; lastTheme = null; lastInfo = DateTime.MinValue; backoffUntil = DateTime.MinValue; }
+        lock (gate) { lastBrightness = null; lastTheme = null; lastInfo = DateTime.MinValue; backoffUntil = DateTime.MinValue; failures = 0; }
     }
 
     void Step()
@@ -75,9 +76,15 @@ public sealed class Engine
         else
         {
             if (client.Host != s.Host) { client.Close(); client.Host = s.Host; lastInfo = DateTime.MinValue; }
+            // Jede Minute ein Vollbild: korrigiert alles, was unterwegs verloren gegangen sein könnte
+            if (DateTime.UtcNow - lastFull > TimeSpan.FromSeconds(60)) { client.ForceFullFrame(); lastFull = DateTime.UtcNow; }
             try
             {
-                var r = client.Push(rgb, (byte)(sess != null ? 2 : 1));
+                byte prio = (byte)(sess != null ? 2 : 1);
+                PushResult r;
+                try { r = client.Push(rgb, prio); }
+                catch { r = client.Push(rgb, prio); }   // ein Abbruch: sofort neu verbinden und nochmal
+                failures = 0;
                 st = r == PushResult.Shown ? EngineStatus.Shown : EngineStatus.Standby;
                 int b = s.Brightness();
                 if (r == PushResult.Shown)
@@ -98,7 +105,10 @@ public sealed class Engine
                 err = e.Message;
                 lastBrightness = null;
                 lastTheme = null;
-                backoffUntil = DateTime.UtcNow.AddSeconds(3);
+                // steigende Wartezeit: 1, 2, 4, 8, höchstens 10 s
+                failures++;
+                backoffUntil = DateTime.UtcNow.AddSeconds(Math.Min(10, Math.Pow(2, failures - 1)));
+                if (failures == 1 || failures % 10 == 0) Log.Write($"Display: {e.Message} (Versuch {failures})");
             }
             if (DateTime.UtcNow - lastInfo > TimeSpan.FromSeconds(15))
             {

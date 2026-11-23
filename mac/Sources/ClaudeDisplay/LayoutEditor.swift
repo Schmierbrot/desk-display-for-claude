@@ -47,6 +47,7 @@ struct LayoutEditorView: View {
         .background(NeonBackground(theme: t))
         .tint(t.accent.color)
         .preferredColorScheme(.dark)
+        .appTextScale()
         .onChange(of: screen) { selected = nil }
     }
 
@@ -175,7 +176,7 @@ struct LayoutEditorView: View {
                     .gesture(resizeGesture(item, h))
             }
             Text("\(Int(item.x)), \(Int(item.y)) · \(Int(item.w)) × \(Int(item.h))")
-                .font(.system(size: 10, weight: .semibold, design: .rounded)).monospacedDigit()
+                .font(DS.sys(size: 10, weight: .semibold, design: .rounded)).monospacedDigit()
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(Capsule().fill(accent))
                 .offset(y: item.y * S > 22 ? -20 : item.h * S + 4)

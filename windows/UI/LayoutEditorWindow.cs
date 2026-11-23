@@ -47,8 +47,7 @@ public sealed class LayoutEditorWindow : Window
     {
         Title = "Claude Display – Display-Layout";
         Icon = Look.AppIcon;
-        Width = 1060; Height = 720;
-        MinWidth = 960; MinHeight = 680;
+        Look.Size(this, 1060, 720, 960, 680, track: false);
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         selected = select; idle = idleView;
         canvas = new LayoutCanvas(this);

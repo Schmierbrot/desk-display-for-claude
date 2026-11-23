@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP="build/Claude Display.app"
-VERSION="1.2.0"
+VERSION="1.3.0"
 # Update-Kanal: GitHub-Repo aus dem Git-Remote (owner/name), Firmware-Version aus dem Quelltext
 REPO=$(git -C .. remote get-url origin 2>/dev/null | sed -E 's#.*github\.com[:/]##; s#\.git$##' || true)
 FW_VERSION=$(grep -m1 'define FW_VERSION' ../firmware/src/main.cpp | cut -d'"' -f2)

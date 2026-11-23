@@ -47,6 +47,7 @@ struct SettingsView: View {
         .background(NeonBackground(theme: settings.appTheme))   // reicht hinter die Titelleiste
         .tint(settings.appTheme.accent.color)
         .preferredColorScheme(.dark)
+        .appTextScale()
     }
 
     private var sidebar: some View {
@@ -81,7 +82,7 @@ struct SettingsView: View {
             Text("Version \(Updater.appVersion)").font(DS.font(11)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 16)
         }
         .padding(10)
-        .frame(width: 210)
+        .frame(width: DS.w(210))
         .background(Color.black.opacity(0.25).ignoresSafeArea())
     }
 }
@@ -264,7 +265,7 @@ struct ClaudeConnectView: View {
                 ZStack {
                     Circle().fill(t.gradient.opacity(0.25)).frame(width: 46, height: 46)
                     Image(systemName: claude.isConnected ? "checkmark" : "person.fill")
-                        .font(.system(size: 19, weight: .semibold))
+                        .font(DS.sys(size: 19, weight: .semibold))
                         .foregroundStyle(claude.isConnected ? good : .white)
                 }
                 VStack(alignment: .leading, spacing: 3) {
@@ -294,7 +295,7 @@ struct ClaudeConnectView: View {
             }
             if case .installing = claude.state, !claude.log.isEmpty {
                 Text(claude.log.split(separator: "\n").suffix(5).joined(separator: "\n"))
-                    .font(.system(size: 10.5, design: .monospaced)).foregroundStyle(.secondary)
+                    .font(DS.sys(size: 10.5, design: .monospaced)).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10).background(RoundedRectangle(cornerRadius: 8).fill(.black.opacity(0.3)))
             }
@@ -453,7 +454,7 @@ struct AppearancePage: View {
     private func colorRow(_ label: String, _ c: Binding<RGB>) -> some View {
         Row(label: label) {
             HStack(spacing: 8) {
-                Text("#" + c.wrappedValue.hex).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                Text("#" + c.wrappedValue.hex).font(DS.sys(size: 11, design: .monospaced)).foregroundStyle(.secondary)
                 ColorPicker("", selection: RGB.binding(c), supportsOpacity: false).labelsHidden()
             }
         }
@@ -598,6 +599,17 @@ struct GeneralPage: View {
                 ModeCard(mode: "window", selected: settings.appMode == "window") { setMode("window") }
             }
         }
+        Card(title: "Schriftgröße") {
+            Picker("", selection: $settings.textScale) {
+                Text("Klein").tag(0.9)
+                Text("Normal").tag(1.0)
+                Text("Groß").tag(1.15)
+                Text("Sehr groß").tag(1.3)
+            }
+            .pickerStyle(.segmented).labelsHidden()
+            Text("Gilt für alle Fenster der App. Die Schrift auf dem Display stellst du im Layout-Editor ein.")
+                .font(DS.font(11)).foregroundStyle(.secondary)
+        }
         Card(title: "Start") {
             Row(label: "Beim Anmelden starten") {
                 Toggle("", isOn: $login).toggleStyle(.switch).labelsHidden()
@@ -608,7 +620,7 @@ struct GeneralPage: View {
                         }
                     }
             }
-            if let loginError { Text(loginError).foregroundStyle(.red).font(.caption) }
+            if let loginError { Text(loginError).foregroundStyle(.red).font(DS.font(11)) }
         }
         Card(title: "Über") {
             Row(label: "Version") { Text(Updater.appVersion).foregroundStyle(.secondary) }
@@ -639,7 +651,7 @@ struct ModeCard: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 10) {
                 Image(systemName: mode == "window" ? "macwindow" : "menubar.rectangle")
-                    .font(.system(size: 28, weight: .light)).foregroundStyle(t.gradient)
+                    .font(DS.sys(size: 28, weight: .light)).foregroundStyle(t.gradient)
                 Text(mode == "window" ? "App-Fenster" : "Menüleiste").font(DS.font(14, .semibold))
                 Text(mode == "window" ? "Großes Dashboard mit Dock-Symbol – wie eine normale App."
                                       : "Unauffällig oben in der Menüleiste, ein Klick öffnet das Panel.")

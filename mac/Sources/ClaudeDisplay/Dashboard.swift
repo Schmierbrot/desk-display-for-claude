@@ -5,6 +5,7 @@ import SwiftUI
 
 /// Fenster ohne Titelleiste, das SwiftUI-Inhalt zeigt (Dashboard, Einstellungen, Einrichtung).
 final class HostedWindow {
+    private static var all: [HostedWindow] = []
     private var window: NSWindow?
     private let size: NSSize
     private let content: () -> AnyView
@@ -14,13 +15,28 @@ final class HostedWindow {
         self.size = size; self.resizable = resizable; self.content = content
     }
 
+    /// Größe passend zur Schriftgröße – höchstens so groß wie der Bildschirm
+    private var scaledSize: NSSize {
+        let k = DS.scale
+        var s = NSSize(width: (size.width * k).rounded(), height: (size.height * k).rounded())
+        if let v = (window?.screen ?? NSScreen.main)?.visibleFrame.size {
+            s.width = min(s.width, v.width - 40); s.height = min(s.height, v.height - 40)
+        }
+        return s
+    }
+
+    /// Nach Änderung der Schriftgröße alle offenen Fenster anpassen
+    static func rescaleAll() {
+        for h in all { if let w = h.window { w.setContentSize(h.scaledSize) } }
+    }
+
     var isVisible: Bool { window?.isVisible ?? false }
 
     func show() {
         if window == nil {
             var style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .fullSizeContentView]
             if resizable { style.insert(.resizable) }
-            let w = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: style, backing: .buffered, defer: false)
+            let w = NSWindow(contentRect: NSRect(origin: .zero, size: scaledSize), styleMask: style, backing: .buffered, defer: false)
             w.titlebarAppearsTransparent = true
             w.titleVisibility = .hidden
             w.isMovableByWindowBackground = false   // nur oben an der Titelleiste verschieben – sonst zieht jedes Ziehen im Fenster mit
@@ -30,6 +46,7 @@ final class HostedWindow {
             w.backgroundColor = AppSettings.shared.appTheme.background.ns
             w.center()
             window = w
+            if !Self.all.contains(where: { $0 === self }) { Self.all.append(self) }
         }
         if let window { DockPresence.shown(window) }
         NSApp.activate(ignoringOtherApps: true)
@@ -135,7 +152,7 @@ struct DashboardView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            left.frame(width: 360)
+            left.frame(width: DS.w(360))
             Divider().opacity(0.15)
             ScrollView { right.padding(.horizontal, 28).padding(.bottom, 28).padding(.top, 6) }.scrollIndicators(.never)
         }
@@ -143,6 +160,7 @@ struct DashboardView: View {
         .background(NeonBackground(theme: settings.appTheme))   // reicht hinter die Titelleiste
         .tint(settings.appTheme.accent.color)
         .preferredColorScheme(.dark)
+        .appTextScale()
     }
 
     // links: Display
@@ -239,7 +257,7 @@ struct DashboardView: View {
 
     private func banner(icon: String, text: String, action: String, run: @escaping () -> Void) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: icon).font(.system(size: 18)).foregroundStyle(settings.appTheme.gradient)
+            Image(systemName: icon).font(DS.sys(size: 18)).foregroundStyle(settings.appTheme.gradient)
             Text(text).font(DS.font(13))
             Spacer()
             Button(action, action: run).buttonStyle(NeonButtonStyle())
@@ -273,7 +291,7 @@ struct DashboardView: View {
             .glass(20, highlight: t.accent.color)
         } else {
             VStack(spacing: 10) {
-                Image(systemName: "moon.zzz.fill").font(.system(size: 30)).foregroundStyle(t.gradient)
+                Image(systemName: "moon.zzz.fill").font(DS.sys(size: 30)).foregroundStyle(t.gradient)
                 Text("Gerade läuft keine Claude-Sitzung").font(DS.font(16, .semibold))
                 Text("Sobald Claude Code arbeitet, siehst du hier Fortschritt und Schritte.")
                     .font(DS.font(12.5)).foregroundStyle(.secondary).multilineTextAlignment(.center)
@@ -291,7 +309,7 @@ struct DashboardView: View {
         default: ("circle", .secondary)
         }
         return HStack(spacing: 10) {
-            Image(systemName: icon).foregroundStyle(color).font(.system(size: 14))
+            Image(systemName: icon).foregroundStyle(color).font(DS.sys(size: 14))
             Text(item.text).font(DS.font(13, item.status == "in_progress" ? .semibold : .regular))
                 .foregroundStyle(item.status == "pending" ? .secondary : .primary)
                 .strikethrough(item.status == "completed", color: .secondary.opacity(0.5))

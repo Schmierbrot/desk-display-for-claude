@@ -18,6 +18,8 @@ public sealed class AppSettings
     /// <summary>"tray" = nur Infobereich, "window" = App-Fenster in der Taskleiste</summary>
     public string AppMode { get; set; } = "tray";
     public bool AutoUpdate { get; set; } = true;
+    /// <summary>Schriftgröße der App: 0,9 klein · 1 normal · 1,15 groß · 1,3 sehr groß</summary>
+    public double TextScale { get; set; } = 1.0;
     [System.Text.Json.Serialization.JsonIgnore] public bool WindowMode => AppMode == "window";
     /// <summary>Einrichtungs-Assistent abgeschlossen</summary>
     public bool SetupDone { get; set; }
@@ -47,6 +49,7 @@ public sealed class AppSettings
         try { s = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new(); }
         catch { s = new(); }
         s.DisplayLayout = (s.DisplayLayout ?? LayoutPresets.Standard).Normalized();
+        s.TextScale = new[] { 0.9, 1.0, 1.15, 1.3 }.MinBy(v => Math.Abs(v - s.TextScale));   // auf die nächste Stufe runden
         if (s.HostId < 2)
         {
             s.HostId = (uint)Random.Shared.NextInt64(2, uint.MaxValue);

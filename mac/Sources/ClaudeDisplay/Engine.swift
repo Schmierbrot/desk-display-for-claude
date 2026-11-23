@@ -39,6 +39,8 @@ final class Engine {
     @ObservationIgnored private var lastTheme: DisplayTheme?
     @ObservationIgnored private var lastInfo = Date.distantPast
     @ObservationIgnored private var backoffUntil = Date.distantPast
+    @ObservationIgnored private var failures = 0
+    @ObservationIgnored private var lastFull = Date.distantPast
     @ObservationIgnored private var paused = false
 
     private init() {
@@ -53,6 +55,11 @@ final class Engine {
         t.setEventHandler { [weak self] in self?.step() }
         t.resume()
         timer = t
+        // Nach dem Ruhezustand sind alte Verbindungen tot – sofort neu verbinden
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.queue.async { self?.client.close(); self?.failures = 0 }
+            self?.settingsChanged()
+        }
     }
 
     /// Nach Änderungen an Helligkeit/Adresse sofort neu anwenden.
@@ -63,6 +70,7 @@ final class Engine {
             self.lastTheme = nil
             self.lastInfo = .distantPast
             self.backoffUntil = .distantPast
+            self.failures = 0
         }
     }
 
@@ -86,8 +94,14 @@ final class Engine {
             st = status
         } else {
             if client.host != host { client.close(); client.host = host; lastInfo = .distantPast }
+            // Jede Minute ein Vollbild: korrigiert alles, was unterwegs verloren gegangen sein könnte
+            if Date().timeIntervalSince(lastFull) > 60 { client.forceFullFrame(); lastFull = Date() }
             do {
-                let r = try client.push(rgb: canvas.rgb, priority: sess != nil ? 2 : 1)
+                let rgb = canvas.rgb, prio: UInt8 = sess != nil ? 2 : 1
+                let r: PushResult
+                do { r = try client.push(rgb: rgb, priority: prio) }
+                catch { r = try client.push(rgb: rgb, priority: prio) }   // ein Abbruch: sofort neu verbinden und nochmal
+                failures = 0
                 st = r == .shown ? .shown : .standby
                 if r == .shown {
                     if brightness != lastBrightness {
@@ -105,7 +119,10 @@ final class Engine {
                 st = .error(error.localizedDescription)
                 lastBrightness = nil
                 lastTheme = nil
-                backoffUntil = Date().addingTimeInterval(3)
+                // steigende Wartezeit: 1, 2, 4, 8, höchstens 10 s
+                failures += 1
+                backoffUntil = Date().addingTimeInterval(min(10, pow(2, Double(failures - 1))))
+                if failures == 1 || failures % 10 == 0 { Log.write("Display: \(error.localizedDescription) (Versuch \(failures))") }
             }
             if Date().timeIntervalSince(lastInfo) > 15 {
                 lastInfo = Date()

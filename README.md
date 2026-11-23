@@ -16,6 +16,8 @@
 - **Frei gestaltbar** – Vorlagen (Neon, Claude, Aurora, Sunset, Mono) oder eigene Farben, Logo und Titel – getrennt für App und Display
 - **Layout-Editor** – jedes Element auf dem Display frei verschieben, in der Größe ändern, ausblenden oder eigene Texte und Linien hinzufügen; mit Vorlagen (Standard, Fokus, Limits groß, Groß), Hilfslinien und Rückgängig
 - **Menüleiste oder Fenster** – unauffällig in der Menüleiste/im Infobereich oder als App mit Dashboard
+- **Schriftgröße** – die ganze App in vier Stufen von „Klein“ bis „Sehr groß“
+- **Stabile Übertragung** – sofortiges Neuverbinden nach Abbrüchen, regelmäßige Vollbilder zur Selbstkorrektur, die Firmware räumt tote Verbindungen auf und überwacht das WLAN
 - **Updates über GitHub** – App und Display-Firmware lassen sich direkt in der App aktualisieren
 - **Nachtmodus** – dimmt automatisch, auch wenn kein Rechner läuft
 

@@ -29,6 +29,9 @@ public sealed class DisplayClient : IDisposable
         stream = null; tcp = null; last = null; owner = false;
     }
 
+    /// <summary>Beim nächsten Mal das ganze Bild schicken (Selbstkorrektur).</summary>
+    public void ForceFullFrame() => last = null;
+
     public PushResult Push(byte[] rgb, byte prio)
     {
         if (stream == null) Connect();
@@ -124,7 +127,7 @@ public sealed class DisplayClient : IDisposable
         var c = new TcpClient { NoDelay = true, ReceiveTimeout = 5000, SendTimeout = 5000 };
         try
         {
-            if (!c.ConnectAsync(Host, 7777).Wait(TimeSpan.FromSeconds(5))) throw new IOException("Display nicht erreichbar");
+            if (!c.ConnectAsync(Host, 7777).Wait(TimeSpan.FromSeconds(3))) throw new IOException("Display nicht erreichbar");
         }
         catch (Exception e) when (e is not IOException)
         {

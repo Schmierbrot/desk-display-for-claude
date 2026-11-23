@@ -45,10 +45,11 @@ struct PanelView: View {
             footer
         }
         .padding(16)
-        .frame(width: 340)
+        .frame(width: DS.w(340))
         .background(NeonBackground())
         .tint(settings.appTheme.accent.color)
         .preferredColorScheme(.dark)
+        .appTextScale()
     }
 
     private var header: some View {

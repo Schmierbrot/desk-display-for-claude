@@ -222,7 +222,7 @@ enum SetupWindow {
 
     static func show() {
         if window == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 560),
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: DS.w(760), height: DS.w(560)),
                              styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
             w.titlebarAppearsTransparent = true
             w.titleVisibility = .hidden
@@ -273,6 +273,7 @@ struct SetupView: View {
         .background(NeonBackground(theme: settings.appTheme))
         .tint(settings.appTheme.accent.color)
         .preferredColorScheme(.dark)
+        .appTextScale()
         .animation(.easeInOut(duration: 0.3), value: model.page)
     }
 
@@ -344,7 +345,7 @@ struct SetupView: View {
         let good = settings.displayTheme.good.color, warn = settings.displayTheme.warn.color
         return Button { model.selected = d } label: {
             HStack(spacing: 14) {
-                Image(systemName: "display").font(.system(size: 22)).frame(width: 34)
+                Image(systemName: "display").font(DS.sys(size: 22)).frame(width: 34)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(d.ip).font(DS.font(15, .semibold))
                     Text(d.detail).font(DS.font(12)).foregroundStyle(.secondary)
@@ -354,7 +355,7 @@ struct SetupView: View {
                     .foregroundStyle(d.kind == .ready ? good : warn)
                     .padding(.horizontal, 9).padding(.vertical, 4)
                     .background(Capsule().fill((d.kind == .ready ? good : warn).opacity(0.15)))
-                Image(systemName: sel ? "checkmark.circle.fill" : "circle").font(.system(size: 18))
+                Image(systemName: sel ? "checkmark.circle.fill" : "circle").font(DS.sys(size: 18))
                     .foregroundStyle(sel ? settings.appTheme.accent.color : .secondary)
             }
             .glass(14, highlight: sel ? settings.appTheme.accent.color : nil)

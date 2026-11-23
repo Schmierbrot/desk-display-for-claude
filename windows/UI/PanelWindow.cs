@@ -31,7 +31,7 @@ public sealed class PanelWindow : Window
         this.openSettings = openSettings; this.quit = quit; this.openSetup = openSetup;
         Title = "Claude Display";
         Icon = Look.AppIcon;
-        Width = 350;
+        Look.Size(this, 350);
         SizeToContent = SizeToContent.Height;
         CanResize = false;
         ShowInTaskbar = false;
