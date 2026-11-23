@@ -27,6 +27,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             RenderTest.run(to: args[i + 1], theme: i + 2 < args.count ? Themes.preset(args[i + 2]).display : nil)
             exit(0)
         }
+        if let i = args.firstIndex(of: "--render-scenarios"), i + 1 < args.count {
+            RenderTest.scenarios(to: args[i + 1])
+            exit(0)
+        }
+        if args.contains("--sessions-test") {
+            for x in ClaudeData().sessions() {
+                print("Sitzung:", x.name, "| wartet:", x.waiting, "| Modell:", x.model.map(Widgets.modelName) ?? "-",
+                      "| Kontext:", x.contextPct.map { "\($0) %" } ?? "-", "| Branch:", x.branch ?? "-",
+                      "| tut:", x.activity ?? "-", "| Plan:", x.done, "/", x.plan.count)
+            }
+            exit(0)
+        }
         if args.contains("--refresh-test") {
             switch ClaudeLogin.accessToken(force: true) {
             case .success: print("Login erneuert")
@@ -166,6 +178,31 @@ enum MenuIcon {
 
 /// `ClaudeDisplay --render-test datei.png` zeichnet Beispielansichten (zum Prüfen ohne Display).
 enum RenderTest {
+    /// Testbilder: normal · wartet · Limit fast voll · Vorlage „Details“ (zum Prüfen ohne Display)
+    static func scenarios(to path: String) {
+        let now = Date()
+        let plan = [PlanItem(text: "a", status: "completed"), PlanItem(text: "b", status: "completed"),
+                    PlanItem(text: "Tests schreiben", status: "in_progress"), PlanItem(text: "d", status: "pending")]
+        var base = SessionInfo(name: "Mein Projekt", secs: 312, plan: plan, prompt: nil, busyCount: 2,
+                               model: "claude-opus-5-5", contextPct: 63, branch: "feature/display",
+                               activity: "Bearbeitet Renderer.swift", index: 1, total: 2)
+        let use = Usage(five: UsageWindow(pct: 42, reset: now.addingTimeInterval(5340)),
+                        week: UsageWindow(pct: 67, reset: now.addingTimeInterval(130_000)), stale: nil)
+        var waiting = base; waiting.waiting = true; waiting.activity = "Hat eine Frage an dich"; waiting.total = 1
+        let hot = Usage(five: UsageWindow(pct: 93, reset: now.addingTimeInterval(2700)), week: use.week, stale: nil)
+        base.index = 1
+        let views = [Renderer.render(session: base, usage: use, tick: 2, layout: LayoutPresets.standard).image,
+                     Renderer.render(session: waiting, usage: use, tick: 2, layout: LayoutPresets.standard).image,
+                     Renderer.render(session: base, usage: hot, tick: 2, layout: LayoutPresets.standard).image,
+                     Renderer.render(session: base, usage: use, tick: 2, layout: LayoutPresets.details).image]
+        let out = CGContext(data: nil, width: 980, height: 245, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        out.setFillColor(CGColor(gray: 0.2, alpha: 1)); out.fill(CGRect(x: 0, y: 0, width: 980, height: 245))
+        for (i, v) in views.enumerated() { out.draw(v, in: CGRect(x: 2 + i * 245, y: 2, width: 240, height: 240)) }
+        let rep = NSBitmapImageRep(cgImage: out.makeImage()!)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    }
+
     static func run(to path: String, theme: DisplayTheme? = nil) {
         let now = Date()
         let use = Usage(five: UsageWindow(pct: 32, reset: now.addingTimeInterval(5340)),

@@ -14,6 +14,8 @@ public static class Pal
     public static SKColor Track => Theme.Track.Sk;
     public static SKColor Accent => Theme.Accent.Sk;
     public static SKColor Good => Theme.Good.Sk;
+    public static SKColor Warn => Theme.Warn.Sk;
+    public static SKColor Bad => Theme.Bad.Sk;
     public static SKColor GoodGlow => Theme.Good.Mix(new RGB(0, 0, 0), 0.75).Sk;
     public static SKColor ForPct(int p) => Theme.ForPct(p).Sk;
 }
@@ -57,6 +59,7 @@ public sealed class Canvas : IDisposable
         new() { Color = col, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = w, StrokeCap = round ? SKStrokeCap.Round : SKStrokeCap.Butt };
 
     public void Circle(float cx, float cy, float r, SKColor col) { using var p = Fill(col); c.DrawCircle(cx, cy, r, p); }
+    public void Line(float x0, float y0, float x1, float y1, SKColor col, float w) { using var p = Stroke(col, w); c.DrawLine(x0, y0, x1, y1, p); }
 
     public void RRect(float x0, float y0, float x1, float y1, float r, SKColor? fill = null, SKColor? stroke = null, float width = 1)
     {

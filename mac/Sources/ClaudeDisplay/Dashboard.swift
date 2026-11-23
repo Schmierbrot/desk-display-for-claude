@@ -228,6 +228,7 @@ struct DashboardView: View {
                 LimitCard(title: "5 Stunden", window: engine.usage?.five)
                 LimitCard(title: "Woche", window: engine.usage?.week)
             }
+            UsageHistoryCard()
         }
     }
 

@@ -9,7 +9,9 @@
 ## Funktionen
 
 - **Live-Sitzung** – Name, Laufzeit, Fortschrittsring und der aktuelle Schritt der gerade arbeitenden Claude-Code-Sitzung – aus der Desktop-App, dem Terminal und auch aus **Cloud-Sitzungen** (Claude Code im Browser)
-- **Nutzungslimit** – 5-Stunden- und Wochenlimit mit Zeit bis zum Reset, etwa jede Minute aktualisiert
+- **Wartet auf dich** – fragt Claude etwas oder braucht eine Freigabe, färbt sich das Display und zeigt es an
+- **Mehrere Sitzungen** – das Display wechselt zwischen allen, die gerade arbeiten
+- **Nutzungslimit** – 5-Stunden- und Wochenlimit mit Zeit bis zum Reset, etwa jede Minute aktualisiert; ab 90 % eine deutliche Warnung, in der App ein Verlauf über 24 Stunden oder 7 Tage
 - **Eigene Uhr** – läuft kein Rechner, zeigt das Display Uhrzeit und Datum (Zeit per NTP)
 - **Mac und PC gleichzeitig** – der Rechner mit aktiver Sitzung bekommt das Display
 - **Einrichtungs-Assistent** – findet das Display im WLAN, spielt bei neuen Geräten die Firmware auf, verbindet dein Claude-Konto
@@ -88,9 +90,11 @@ cd mac && ./build.sh --no-install
 # Windows-App (.NET 8)
 cd windows && dotnet publish -c Release -r win-x64 -o publish
 
-# Alles bauen und als GitHub-Release veröffentlichen
+# Alles lokal bauen und als GitHub-Release veröffentlichen
 ./scripts/release.sh 1.0.0
 ```
+
+Releases baut auch **GitHub Actions** (`.github/workflows/build.yml`): Ein Tag wie `v1.4.0` pushen – Firmware, macOS-Installer und Windows-App werden auf sauberen Rechnern gebaut, geprüft (die Windows-App wird dabei auf echtem Windows gestartet) und veröffentlicht. Den Release-Text liest der Workflow aus `.github/release-notes/v1.4.0.md`.
 
 ## Lizenz
 

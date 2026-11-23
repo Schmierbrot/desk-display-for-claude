@@ -1,0 +1,119 @@
+# Baut Firmware, macOS-Installer und Windows-App auf sauberen GitHub-Rechnern.
+#   • Tag „v1.2.3“ pushen      → bauen, prüfen und als Release veröffentlichen
+#   • „Run workflow“ (manuell) → nur bauen und prüfen, Dateien als Artefakte
+# Release-Text: .github/release-notes/v1.2.3.md (falls vorhanden)
+name: Build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.fw }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('firmware/platformio.ini') }}
+      - name: PlatformIO
+        run: pip install platformio
+      - name: Firmware bauen
+        working-directory: firmware
+        run: |
+          pio run -e display -s
+          mkdir -p dist
+          gzip -9 -n -c .pio/build/display/firmware.bin > dist/firmware.bin.gz
+      - id: v
+        run: echo "fw=$(grep -m1 'define FW_VERSION' firmware/src/main.cpp | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with: { name: firmware, path: firmware/dist/firmware.bin.gz }
+
+  mac:
+    needs: firmware
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: firmware, path: firmware/dist }
+      - name: Vorbereiten
+        run: |
+          mv firmware/dist/firmware.bin.gz firmware/dist/display.bin.gz
+          python3 -m pip install --break-system-packages pillow
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            sed -i '' -E "s/^VERSION=\".*\"/VERSION=\"${GITHUB_REF_NAME#v}\"/" mac/build.sh
+          fi
+      - name: App und Installer bauen
+        env: { PYTHON: python3 }
+        run: cd mac && ./make_installer.sh
+      - name: Prüfen
+        run: |
+          APP="mac/build/Claude Display.app/Contents/MacOS/ClaudeDisplay"
+          "$APP" --render-test render-mac.png
+          test -s render-mac.png
+          # keine lokalen Pfade oder Namen im Programm
+          ! LC_ALL=C grep -aqE "/Users/|/home/runner" "$APP"
+          mv "dist/Claude Display Installer.pkg" dist/ClaudeDisplay-mac.pkg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: |
+            dist/ClaudeDisplay-mac.pkg
+            render-mac.png
+
+  windows:
+    needs: firmware
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: firmware, path: windows/Assets }
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: "8.0.x" }
+      - name: App bauen
+        shell: bash
+        working-directory: windows
+        run: |
+          VERSION=$(grep -oP '(?<=<Version>)[^<]+' ClaudeDisplay.csproj)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION="${GITHUB_REF_NAME#v}"; fi
+          dotnet publish -c Release -r win-x64 -o publish -v q \
+            -p:Version="$VERSION" -p:UpdateRepo="$GITHUB_REPOSITORY" -p:FirmwareVersion="${{ needs.firmware.outputs.version }}"
+      - name: Prüfen (startet die App auf echtem Windows)
+        shell: pwsh
+        run: |
+          $p = Start-Process windows/publish/ClaudeDisplay.exe -ArgumentList "--render-test", "$PWD/render-windows.png" -PassThru -Wait
+          if (-not (Test-Path render-windows.png)) { throw "Die App hat kein Bild gezeichnet (Exit $($p.ExitCode))" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            windows/publish/ClaudeDisplay.exe
+            render-windows.png
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [firmware, mac, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: out }
+      - name: Veröffentlichen
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          mkdir -p rel
+          cp out/firmware/firmware.bin.gz out/mac/dist/ClaudeDisplay-mac.pkg out/windows/windows/publish/ClaudeDisplay.exe rel/
+          printf '{"app":"%s","firmware":"%s"}\n' "$V" "${{ needs.firmware.outputs.version }}" > rel/release.json
+          NOTES=".github/release-notes/${GITHUB_REF_NAME}.md"
+          if [ -f "$NOTES" ]; then ARGS=(--notes-file "$NOTES"); else ARGS=(--generate-notes); fi
+          gh release create "$GITHUB_REF_NAME" --title "Claude Display $V" "${ARGS[@]}" rel/*

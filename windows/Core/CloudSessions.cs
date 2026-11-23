@@ -22,6 +22,7 @@ public sealed class CloudSessions
         public bool Loaded;
         public DateTime Since = DateTime.UtcNow;
         public string Title = "";
+        public bool Waiting;
     }
 
     readonly object gate = new();
@@ -64,10 +65,13 @@ public sealed class CloudSessions
                     if (id == null) continue;
                     if (Str(s, "environment_kind") == "bridge" && !IncludeBridge) continue;   // läuft lokal – lesen wir aus den Dateien
                     var last = DateTimeOffset.TryParse(Str(s, "last_event_at"), out var l) ? l.UtcDateTime : DateTime.MinValue;
-                    bool working = Str(s, "status") != "archived" && (Str(s, "status_bucket") == "working" || Str(s, "worker_status") == "running");
+                    var bucket = Str(s, "status_bucket") ?? "";
+                    bool waitingBucket = new[] { "wait", "input", "action", "attention", "blocked" }.Any(bucket.Contains);
+                    bool working = Str(s, "status") != "archived" && (bucket == "working" || Str(s, "worker_status") == "running" || waitingBucket);
                     if (!working || now - last > TimeSpan.FromMinutes(15)) continue;
                     if (!tracked.TryGetValue(id, out var t)) tracked[id] = t = new Tracked();
                     t.Title = Str(s, "title") ?? "";
+                    t.Waiting = waitingBucket;
                     ids.Add((id, last));
                 }
             var active = ids.Select(x => x.id).ToHashSet();
@@ -78,8 +82,13 @@ public sealed class CloudSessions
         Publish(runningIds.Where(tracked.ContainsKey).Select(id =>
         {
             var t = tracked[id];
+            bool waiting = t.Waiting || t.State.AwaitingUser;
             return new SessionInfo(t.Title.Length == 0 ? "Cloud-Sitzung" : t.Title, (int)Math.Max(0, (now - t.Since).TotalSeconds),
-                                   t.State.Plan.ToList(), t.State.LastPrompt, runningIds.Count);
+                                   t.State.Plan.ToList(), t.State.LastPrompt, runningIds.Count)
+            {
+                Waiting = waiting, Model = t.State.Model, ContextPct = t.State.ContextPct, Branch = t.State.Branch,
+                Activity = waiting ? "Wartet auf dich" : t.State.Activity,
+            };
         }).ToList());
     }
 

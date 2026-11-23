@@ -12,6 +12,14 @@ static class Program
         // ClaudeDisplay --render-test datei.png  -> Beispielansichten zeichnen (zum Prüfen ohne Display)
         int i = Array.IndexOf(args, "--render-test");
         if (i >= 0 && i + 1 < args.Length) { RenderTest(args[i + 1]); return; }
+        int si = Array.IndexOf(args, "--render-scenarios");
+        if (si >= 0 && si + 1 < args.Length) { RenderScenarios(args[si + 1]); return; }
+        if (args.Contains("--sessions-test"))
+        {
+            foreach (var x in new ClaudeData().Sessions())
+                Console.WriteLine($"Sitzung: {x.Name} | wartet: {x.Waiting} | Modell: {(x.Model is { } m ? Widgets.ModelName(m) : "-")} | Kontext: {(x.ContextPct is { } c ? c + " %" : "-")} | Branch: {x.Branch ?? "-"} | tut: {x.Activity ?? "-"} | Plan: {x.Done} / {x.Plan.Count}");
+            return;
+        }
         if (args.Contains("--cloud-test"))
         {
             // Cloud-Abfrage prüfen; mit „bridge“ auch lokale Sitzungen mit Fernsteuerung
@@ -33,6 +41,29 @@ static class Program
 
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>().UsePlatformDetect().LogToTrace();
+
+    /// <summary>Testbilder: normal · wartet · Limit fast voll · Vorlage „Details“.</summary>
+    static void RenderScenarios(string path)
+    {
+        List<PlanItem> plan = [new("a", "completed"), new("b", "completed"), new("Tests schreiben", "in_progress"), new("d", "pending")];
+        var b = new SessionInfo("Mein Projekt", 312, plan, null, 2)
+            { Model = "claude-opus-5-5", ContextPct = 63, Branch = "feature/display", Activity = "Bearbeitet Renderer.cs", Index = 1, Total = 2 };
+        var use = new Usage(new(42, DateTime.UtcNow.AddSeconds(5340)), new(67, DateTime.UtcNow.AddSeconds(130_000)), null);
+        var hot = use with { Five = new(93, DateTime.UtcNow.AddSeconds(2700)) };
+        var wait = b with { Waiting = true, Activity = "Hat eine Frage an dich", Total = 1 };
+        var views = new[] { (b, use, LayoutPresets.Standard), (wait, use, LayoutPresets.Standard), (b, hot, LayoutPresets.Standard), (b, use, LayoutPresets.Details) };
+        using var outBmp = new SKBitmap(980, 245);
+        using var oc = new SKCanvas(outBmp);
+        oc.Clear(new SKColor(50, 50, 50));
+        for (int i = 0; i < views.Length; i++)
+        {
+            using var c = Renderer.Render(views[i].Item1, views[i].Item2, 2, layout: views[i].Item3);
+            oc.DrawBitmap(c.Bitmap, 2 + i * 245, 2);
+        }
+        using var img = SKImage.FromBitmap(outBmp);
+        using var data = img.Encode(SKEncodedImageFormat.Png, 100);
+        File.WriteAllBytes(path, data.ToArray());
+    }
 
     static void RenderTest(string path)
     {

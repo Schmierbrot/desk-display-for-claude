@@ -5,7 +5,8 @@ namespace ClaudeDisplay.Core;
 
 /// <summary>Bausteine des Displays. Jeder zeichnet sich in seinen Rahmen und passt Schrift und Größe an die Höhe an.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
-public enum WidgetKind { Header, Clock, Ring, Status, Name, Timer, Step, Limit5, LimitWeek, Ready, BigClock, Date, Calm, Label, Line }
+public enum WidgetKind { Header, Clock, Ring, Status, Name, Timer, Step, Limit5, LimitWeek, Ready, BigClock, Date, Calm, Label, Line,
+    Context, Model, Branch, Activity }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum TextAlign { Left, Center, Right }
@@ -32,6 +33,10 @@ public static class WidgetInfo
         WidgetKind.Date => "Datum",
         WidgetKind.Calm => "„Alles ruhig“",
         WidgetKind.Label => "Eigener Text",
+        WidgetKind.Context => "Kontext-Füllstand",
+        WidgetKind.Model => "Modell",
+        WidgetKind.Branch => "Git-Branch",
+        WidgetKind.Activity => "Tut gerade",
         _ => "Linie",
     };
 
@@ -48,11 +53,15 @@ public static class WidgetInfo
         WidgetKind.Date => "▦",
         WidgetKind.Calm => "⬭",
         WidgetKind.Label => "T",
+        WidgetKind.Context => "▮",
+        WidgetKind.Model => "◈",
+        WidgetKind.Branch => "⑂",
+        WidgetKind.Activity => "⚒",
         _ => "━",
     };
 
     public static bool Alignable(WidgetKind k) => k is WidgetKind.Clock or WidgetKind.Name or WidgetKind.Timer or WidgetKind.Ready
-        or WidgetKind.BigClock or WidgetKind.Date or WidgetKind.Label;
+        or WidgetKind.BigClock or WidgetKind.Date or WidgetKind.Label or WidgetKind.Model or WidgetKind.Branch or WidgetKind.Activity;
 
     public static string Label(ColorRole r) => r switch
     {
@@ -113,7 +122,8 @@ public sealed class DisplayLayout
     public List<LayoutItem> Idle { get; set; } = [];
 
     public static readonly WidgetKind[] ActiveKinds = [WidgetKind.Header, WidgetKind.Clock, WidgetKind.Ring, WidgetKind.Status,
-        WidgetKind.Name, WidgetKind.Timer, WidgetKind.Step, WidgetKind.Limit5, WidgetKind.LimitWeek];
+        WidgetKind.Name, WidgetKind.Timer, WidgetKind.Step, WidgetKind.Limit5, WidgetKind.LimitWeek,
+        WidgetKind.Context, WidgetKind.Model, WidgetKind.Branch, WidgetKind.Activity];
     public static readonly WidgetKind[] IdleKinds = [WidgetKind.Header, WidgetKind.Ready, WidgetKind.BigClock, WidgetKind.Date,
         WidgetKind.Calm, WidgetKind.Limit5, WidgetKind.LimitWeek];
 
@@ -207,9 +217,23 @@ public static class LayoutPresets
         ],
     };
 
+    public static DisplayLayout Details => new()
+    {
+        Active = [
+            I(WidgetKind.Header, 6, 6, 166, 24), I(WidgetKind.Clock, 172, 6, 58, 24, align: TextAlign.Right),
+            I(WidgetKind.Ring, 10, 38, 70, 70), I(WidgetKind.Status, 88, 38, 144, 14),
+            I(WidgetKind.Name, 88, 56, 144, 26, align: TextAlign.Left), I(WidgetKind.Activity, 88, 86, 144, 16, align: TextAlign.Left),
+            I(WidgetKind.Timer, 104, 104, 126, 20, visible: false, align: TextAlign.Left),
+            I(WidgetKind.Step, 8, 114, 224, 38), I(WidgetKind.Context, 10, 158, 104, 34),
+            I(WidgetKind.Model, 126, 160, 104, 15, align: TextAlign.Left), I(WidgetKind.Branch, 126, 178, 104, 15, align: TextAlign.Left),
+            I(WidgetKind.Limit5, 10, 198, 104, 36), I(WidgetKind.LimitWeek, 126, 198, 104, 36),
+        ],
+        Idle = Standard.Idle,
+    };
+
     public static LayoutPreset[] All => [
         new("standard", "Standard", Standard), new("focus", "Fokus", Focus),
-        new("limits", "Limits groß", BigLimits), new("big", "Groß", Big),
+        new("limits", "Limits groß", BigLimits), new("big", "Groß", Big), new("details", "Details", Details),
     ];
 }
 
@@ -230,11 +254,15 @@ public static class Widgets
             case WidgetKind.Clock: Line(c, r, d.Now.ToString("HH:mm"), 0.667f, 560, Pal.Muted, item.Align ?? TextAlign.Right); break;
             case WidgetKind.Ring: if (s != null) Ring(c, r, s, d.Tick); break;
             case WidgetKind.Status: if (s != null) Status(c, r, s, d.Tick); break;
+            case WidgetKind.Context: if (s?.ContextPct is { } cp) Meter(c, r, "KONTEXT", cp, s.Waiting ? Pal.Warn : Pal.Accent); break;
+            case WidgetKind.Model: if (s?.Model is { } mo) Line(c, r, ModelName(mo), 0.8f, 600, Pal.Muted, item.Align ?? TextAlign.Left); break;
+            case WidgetKind.Branch: if (s?.Branch is { } br) Branch(c, r, br, item.Align ?? TextAlign.Left); break;
+            case WidgetKind.Activity: if (s?.Activity is { } ac) Line(c, r, ac, 0.8f, 560, s.Waiting ? Pal.Warn : Pal.Muted, item.Align ?? TextAlign.Left); break;
             case WidgetKind.Name: if (s != null) Name(c, r, s.Name, item.Align ?? TextAlign.Left); break;
             case WidgetKind.Timer: if (s != null) Line(c, r, Renderer.FmtTimer(s.Secs), 0.75f, 560, Pal.Muted, item.Align ?? TextAlign.Left); break;
             case WidgetKind.Step: if (s != null) Step(c, r, s); break;
-            case WidgetKind.Limit5: Limit(c, r, "5 STD", d.Usage?.Five, d.Usage?.Stale, d.Usage != null); break;
-            case WidgetKind.LimitWeek: Limit(c, r, "WOCHE", d.Usage?.Week, d.Usage?.Stale, d.Usage != null); break;
+            case WidgetKind.Limit5: Limit(c, r, "5 STD", d.Usage?.Five, d.Usage?.Stale, d.Usage != null, d.Tick); break;
+            case WidgetKind.LimitWeek: Limit(c, r, "WOCHE", d.Usage?.Week, d.Usage?.Stale, d.Usage != null, d.Tick); break;
             case WidgetKind.Ready: Ready(c, r, item.Align ?? TextAlign.Right); break;
             case WidgetKind.BigClock: Line(c, r, d.Now.ToString("HH:mm"), 0.917f, 330, Pal.Text, item.Align ?? TextAlign.Center); break;
             case WidgetKind.Date: Line(c, r, Renderer.DateText(d.Now), 0.79f, 600, Pal.Muted, item.Align ?? TextAlign.Center); break;
@@ -281,30 +309,80 @@ public static class Widgets
     {
         float rad = Math.Min(r.Width, r.Height) / 2, w = rad * 0.2f, cx = r.MidX, cy = r.MidY;
         c.Arc(cx, cy, rad, w, 0, 360, Pal.Track, caps: false);
+        // Wartet Claude auf dich, leuchtet der Ring in der Warnfarbe
+        var a1 = s.Waiting ? Pal.Theme.Warn : Pal.Theme.Accent;
+        var a2 = s.Waiting ? Pal.Theme.Warn.Mix(Pal.Theme.Bad, 0.4) : Pal.Theme.Accent2;
         if (s.Plan.Count > 0)
         {
             float frac = (float)s.Done / s.Plan.Count;
-            if (frac > 0) c.GradientArc(cx, cy, rad, w, 0, Math.Min(359.4f, 360 * frac), Pal.Theme.Accent, Pal.Theme.Accent2);
+            if (frac > 0) c.GradientArc(cx, cy, rad, w, 0, Math.Min(359.4f, 360 * frac), a1, a2);
+            else if (s.Waiting) c.Arc(cx, cy, rad, w, 0, 360, Pal.Warn.WithAlpha(90), caps: false);
             c.Text(cx, cy - rad * 0.1f, s.Done.ToString(), F(rad * 0.75f, 700), Pal.Text, Canvas.H.Center, Canvas.V.Middle);
             c.Text(cx, cy + rad * 0.475f, $"von {s.Plan.Count}", F(rad * 0.275f, 600), Pal.Muted, Canvas.H.Center, Canvas.V.Middle);
         }
         else
         {
             float start = tick * 40 % 360;
-            c.GradientArc(cx, cy, rad, w, start, start + 80, Pal.Theme.Accent, Pal.Theme.Accent2);
-            c.Text(cx, cy, "···", F(rad * 0.55f, 700), Pal.Muted, Canvas.H.Center, Canvas.V.Middle);
+            if (s.Waiting) c.Arc(cx, cy, rad, w, 0, 360, Pal.Warn, caps: false);
+            else c.GradientArc(cx, cy, rad, w, start, start + 80, a1, a2);
+            c.Text(cx, cy, s.Waiting ? "?" : "···", F(rad * 0.55f, 700), s.Waiting ? Pal.Warn : Pal.Muted, Canvas.H.Center, Canvas.V.Middle);
         }
     }
 
     static void Status(Canvas c, SKRect r, SessionInfo s, int tick)
     {
         float k = r.Height / 14;
-        c.Circle(r.Left + 4 * k, r.MidY, (tick % 2 == 0 ? 5.5f : 4.2f) * k, Pal.GoodGlow);
-        c.Circle(r.Left + 4 * k, r.MidY, 3.4f * k, Pal.Good);
-        var f = F(10 * k, 700);
+        var col = s.Waiting ? Pal.Warn : Pal.Good;
+        var glow = (s.Waiting ? Pal.Theme.Warn : Pal.Theme.Good).Mix(new RGB(0, 0, 0), 0.75).Sk;
+        c.Circle(r.Left + 4 * k, r.MidY, (tick % 2 == 0 ? 5.5f : 4.2f) * k, glow);
+        c.Circle(r.Left + 4 * k, r.MidY, 3.4f * k, col);
+        // „1/2“ beim Durchwechseln, sonst „+1“ für weitere arbeitende Sitzungen
+        var more = s.Total > 1 ? $"  {s.Index}/{s.Total}" : s.BusyCount > 1 ? $"  +{s.BusyCount - 1}" : "";
+        var text = (s.Waiting ? "WARTET AUF DICH" : "ARBEITET") + more;
+        float size = 10 * k, maxw = r.Width - 13 * k;
+        while (size > 5 && c.TLen(text, F(size, 700)) + text.Length * 1.2f * size / 10 > maxw) size -= 0.5f;
+        var f = F(size, 700);
         var m = f.Metrics;
-        c.Spaced(r.Left + 13 * k, r.MidY - (m.Descent - m.Ascent) / 2,
-                 "ARBEITET" + (s.BusyCount > 1 ? $"  +{s.BusyCount - 1}" : ""), f, Pal.Good, 1.2f * k);
+        c.Spaced(r.Left + 13 * k, r.MidY - (m.Descent - m.Ascent) / 2, text, f, col, 1.2f * size / 10);
+    }
+
+    /// <summary>Modell-ID lesbar machen: „claude-opus-5-5“ → „Opus 5.5“.</summary>
+    public static string ModelName(string id)
+    {
+        var p = id.Split('-').ToList();
+        if (p.Count > 0 && p[0] == "claude") p.RemoveAt(0);
+        p = p.Where(x => !(x.Length == 8 && int.TryParse(x, out _)) && !x.StartsWith('[')).ToList();
+        if (p.Count == 0) return id;
+        var nums = p.Skip(1).Where(x => int.TryParse(x, out _)).ToList();
+        return char.ToUpper(p[0][0]) + p[0][1..] + (nums.Count == 0 ? "" : " " + string.Join(".", nums));
+    }
+
+    /// <summary>Kleines Zweig-Symbol und Branch-Name.</summary>
+    static void Branch(Canvas c, SKRect r, string name, TextAlign a)
+    {
+        float k = r.Height / 15, icon = 12 * k;
+        var f = F(12 * k, 600);
+        var text = c.Fit(name, f, r.Width - icon);
+        float total = icon + c.TLen(text, f);
+        float x0 = a == TextAlign.Left ? r.Left : a == TextAlign.Center ? r.MidX - total / 2 : r.Right - total;
+        var col = Pal.Muted;
+        c.Line(x0 + 3 * k, r.MidY - 5 * k, x0 + 3 * k, r.MidY + 5 * k, col, 1.4f * k);
+        c.Line(x0 + 3 * k, r.MidY + 1 * k, x0 + 8 * k, r.MidY - 4 * k, col, 1.4f * k);
+        c.Circle(x0 + 3 * k, r.MidY + 5 * k, 1.7f * k, col);
+        c.Circle(x0 + 8 * k, r.MidY - 4.5f * k, 1.7f * k, col);
+        c.Text(x0 + icon, r.MidY, text, f, col, v: Canvas.V.Middle);
+    }
+
+    /// <summary>Anzeige mit Prozentzahl und Balken (Kontext).</summary>
+    static void Meter(Canvas c, SKRect r, string label, int pct, SKColor col)
+    {
+        float k = r.Height / 34, b = r.Top + 24 * k;
+        c.Spaced(r.Left, r.Top + 1 * k, label, F(9 * k, 700), Pal.Dim, 1.1f * k);
+        var color = pct >= 90 ? Pal.Bad : pct >= 75 ? Pal.Warn : col;
+        var big = F(16 * k, 700);
+        c.Text(r.Left, b, pct.ToString(), big, color, v: Canvas.V.Baseline);
+        c.Text(r.Left + c.TLen(pct.ToString(), big) + k, b, "%", F(10 * k, 650), color, v: Canvas.V.Baseline);
+        c.Bar(r.Left, r.Top + 28 * k, r.Right, 4 * k, pct, color);
     }
 
     static void Name(Canvas c, SKRect r, string name, TextAlign a)
@@ -324,13 +402,14 @@ public static class Widgets
     {
         float k = r.Height / 44;
         string text; SKColor col, accent;
-        if (s.Plan.Count > 0)
+        if (s.Waiting) { text = s.Activity ?? "Wartet auf dich"; col = Pal.Warn; accent = Pal.Warn; }
+        else if (s.Plan.Count > 0)
         {
             if (s.CurrentStep is { } cur) { text = cur; col = Pal.Text; accent = Pal.Accent; }
             else { text = "Alle Schritte erledigt"; col = Pal.Good; accent = Pal.Good; }
         }
         else { text = s.Prompt ?? "Denkt nach …"; col = Pal.Text; accent = Pal.Accent; }
-        c.RRect(r.Left, r.Top, r.Right, r.Bottom, Math.Min(12 * k, Math.Min(r.Width, r.Height) / 2), stroke: Pal.Edge);
+        c.RRect(r.Left, r.Top, r.Right, r.Bottom, Math.Min(12 * k, Math.Min(r.Width, r.Height) / 2), stroke: s.Waiting ? Pal.Warn : Pal.Edge);
         c.RRect(r.Left + 7 * k, r.Top + 9 * k, r.Left + 10.5f * k, r.Bottom - 9 * k, 1.75f * k, fill: accent);
         var f = F(15 * k, 600);
         float lh = 19 * k;
@@ -340,7 +419,7 @@ public static class Widgets
         foreach (var l in lines) { c.Text(r.Left + 19 * k, sy, l, f, col, v: Canvas.V.Middle); sy += lh; }
     }
 
-    static void Limit(Canvas c, SKRect r, string label, UsageWindow? w, DateTime? stale, bool available)
+    static void Limit(Canvas c, SKRect r, string label, UsageWindow? w, DateTime? stale, bool available, int tick = 0)
     {
         float k = r.Height / 48, b = r.Top + 36 * k;
         c.Spaced(r.Left, r.Top + 2 * k, label, F(10 * k, 700), Pal.Dim, 1.2f * k);
@@ -356,8 +435,24 @@ public static class Widgets
         var big = F(24 * k, 700);
         c.Text(r.Left, b, w.Pct.ToString(), big, col, v: Canvas.V.Baseline);
         c.Text(r.Left + c.TLen(w.Pct.ToString(), big) + k, b, "%", F(13 * k, 650), col, v: Canvas.V.Baseline);
+        // Limit fast erreicht: pulsierender Rahmen und deutlicher Hinweis auf den Reset
+        bool critical = w.Pct >= 90 && stale == null;
+        if (critical)
+        {
+            float pad = 3 * k;
+            c.RRect(r.Left - pad, r.Top - pad, r.Right + pad, r.Bottom + pad, 6 * k,
+                    stroke: tick % 2 == 0 ? Pal.Bad : Pal.Bad.WithAlpha(90), width: Math.Max(1, 1.5f * k));
+        }
         if (stale is { } st) c.Text(r.Right, b, "Stand " + st.ToString("HH:mm"), small, Pal.Dim, Canvas.H.Right, Canvas.V.Baseline);
-        else if (w.Reset is { } rs) c.Text(r.Right, b, Renderer.FmtReset(rs - DateTime.UtcNow), small, Pal.Muted, Canvas.H.Right, Canvas.V.Baseline);
+        else if (w.Reset is { } rs)
+        {
+            var t = Renderer.FmtReset(rs - DateTime.UtcNow);
+            var f = critical ? F(11 * k, 700) : small;
+            // „Reset 45 min“, wenn Platz ist – sonst nur die Zeit
+            float pctWidth = c.TLen(w.Pct + "%", big) + 6 * k;
+            var lbl = critical && c.TLen("Reset " + t, f) <= r.Width - pctWidth ? "Reset " + t : t;
+            c.Text(r.Right, b, lbl, f, critical ? Pal.Bad : Pal.Muted, Canvas.H.Right, Canvas.V.Baseline);
+        }
         c.Bar(r.Left, r.Top + 41 * k, r.Right, 5 * k, w.Pct, col);
     }
 

@@ -15,6 +15,8 @@ public sealed class AppSettings
     public bool LiveUsage { get; set; } = true;
     /// <summary>Cloud-Sitzungen (Claude Code im Browser/in der Cloud) mit anzeigen</summary>
     public bool CloudSessions { get; set; } = true;
+    /// <summary>Mehrere arbeitende Sitzungen abwechselnd zeigen</summary>
+    public bool RotateSessions { get; set; } = true;
     /// <summary>"tray" = nur Infobereich, "window" = App-Fenster in der Taskleiste</summary>
     public string AppMode { get; set; } = "tray";
     public bool AutoUpdate { get; set; } = true;

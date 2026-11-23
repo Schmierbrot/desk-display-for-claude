@@ -62,7 +62,15 @@ public sealed class Engine
     void StepLocked()
     {
         var s = AppSettings.Shared;
-        var sess = data.CurrentSession();
+        // Mehrere Sitzungen: wer auf dich wartet, kommt zuerst; sonst alle 8 s die nächste
+        var all = data.Sessions();
+        var group = all.Any(x => x.Waiting) ? all.Where(x => x.Waiting).ToList() : all;
+        SessionInfo? sess = null;
+        if (group.Count > 0)
+        {
+            int idx = s.RotateSessions ? (tick / 8) % group.Count : 0;
+            sess = group[idx] with { Index = idx + 1, Total = group.Count };
+        }
         var use = data.GetUsage(s.LiveUsage, s.Enabled && !string.IsNullOrWhiteSpace(s.Host) && State?.Status != EngineStatus.Standby);
         tick++;
         using var canvas = Renderer.Render(sess, use, tick);

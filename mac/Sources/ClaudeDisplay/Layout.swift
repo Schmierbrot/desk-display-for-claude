@@ -7,6 +7,7 @@ import AppKit
 enum WidgetKind: String, Codable, CaseIterable {
     case header, clock, ring, status, name, timer, step, limit5, limitWeek   // Ansicht „Arbeitet“
     case ready, bigClock, date, calm                                         // Ansicht „Bereit“
+    case context, model, branch, activity                                    // Details zur Sitzung
     case label, line                                                         // eigene Bausteine
 
     var label: String {
@@ -24,6 +25,10 @@ enum WidgetKind: String, Codable, CaseIterable {
         case .bigClock: return "Uhrzeit groß"
         case .date: return "Datum"
         case .calm: return "„Alles ruhig“"
+        case .context: return "Kontext-Füllstand"
+        case .model: return "Modell"
+        case .branch: return "Git-Branch"
+        case .activity: return "Tut gerade"
         case .label: return "Eigener Text"
         case .line: return "Linie"
         }
@@ -41,13 +46,17 @@ enum WidgetKind: String, Codable, CaseIterable {
         case .limit5, .limitWeek: return "gauge.with.dots.needle.50percent"
         case .date: return "calendar"
         case .calm: return "capsule"
+        case .context: return "chart.bar.fill"
+        case .model: return "cpu"
+        case .branch: return "arrow.triangle.branch"
+        case .activity: return "hammer"
         case .label: return "character.cursor.ibeam"
         case .line: return "line.horizontal.3"
         }
     }
 
     /// Bausteine mit wählbarer Ausrichtung
-    var alignable: Bool { [.clock, .name, .timer, .ready, .bigClock, .date, .label].contains(self) }
+    var alignable: Bool { [.clock, .name, .timer, .ready, .bigClock, .date, .label, .model, .branch, .activity].contains(self) }
 }
 
 enum TextAlign: String, Codable, CaseIterable { case left, center, right }
@@ -111,7 +120,8 @@ struct DisplayLayout: Codable, Equatable {
     var active: [LayoutItem]
     var idle: [LayoutItem]
 
-    static let activeKinds: [WidgetKind] = [.header, .clock, .ring, .status, .name, .timer, .step, .limit5, .limitWeek]
+    static let activeKinds: [WidgetKind] = [.header, .clock, .ring, .status, .name, .timer, .step, .limit5, .limitWeek,
+                                            .context, .model, .branch, .activity]
     static let idleKinds: [WidgetKind] = [.header, .ready, .bigClock, .date, .calm, .limit5, .limitWeek]
 
     /// Ergänzt fehlende Bausteine (z. B. nach einem Update) und entfernt doppelte.
@@ -224,11 +234,30 @@ enum LayoutPresets {
             LayoutItem(.limitWeek, 126, 190, 104, 46),
         ])
 
+    static let details = DisplayLayout(
+        active: [
+            LayoutItem(.header, 6, 6, 166, 24),
+            LayoutItem(.clock, 172, 6, 58, 24, align: .right),
+            LayoutItem(.ring, 10, 38, 70, 70),
+            LayoutItem(.status, 88, 38, 144, 14),
+            LayoutItem(.name, 88, 56, 144, 26, align: .left),
+            LayoutItem(.activity, 88, 86, 144, 16, align: .left),
+            LayoutItem(.timer, 104, 104, 126, 20, visible: false, align: .left),
+            LayoutItem(.step, 8, 114, 224, 38),
+            LayoutItem(.context, 10, 158, 104, 34),
+            LayoutItem(.model, 126, 160, 104, 15, align: .left),
+            LayoutItem(.branch, 126, 178, 104, 15, align: .left),
+            LayoutItem(.limit5, 10, 198, 104, 36),
+            LayoutItem(.limitWeek, 126, 198, 104, 36),
+        ],
+        idle: standard.idle)
+
     static let all: [LayoutPreset] = [
         LayoutPreset(id: "standard", name: "Standard", layout: standard),
         LayoutPreset(id: "focus", name: "Fokus", layout: focus),
         LayoutPreset(id: "limits", name: "Limits groß", layout: bigLimits),
         LayoutPreset(id: "big", name: "Groß", layout: big),
+        LayoutPreset(id: "details", name: "Details", layout: details),
     ]
 }
 
@@ -250,11 +279,15 @@ enum Widgets {
         case .clock: line(c, r, Renderer.clock(d.now), 0.667, 560, Palette.muted, item.align ?? .right)
         case .ring: if let s = d.session { ring(c, r, s, d.tick) }
         case .status: if let s = d.session { status(c, r, s, d.tick) }
+        case .context: if let s = d.session, let p = s.contextPct { meter(c, r, "KONTEXT", p, s.waiting ? Palette.warn : Palette.accent, d.tick) }
+        case .model: if let m = d.session?.model { line(c, r, Self.modelName(m), 0.8, 600, Palette.muted, item.align ?? .left) }
+        case .branch: if let b = d.session?.branch { branch(c, r, b, item.align ?? .left) }
+        case .activity: if let s = d.session, let a = s.activity { line(c, r, a, 0.8, 560, s.waiting ? Palette.warn : Palette.muted, item.align ?? .left) }
         case .name: if let s = d.session { name(c, r, s.name, item.align ?? .left) }
         case .timer: if let s = d.session { line(c, r, Renderer.fmtTimer(s.secs), 0.75, 560, Palette.muted, item.align ?? .left) }
         case .step: if let s = d.session { step(c, r, s) }
-        case .limit5: limit(c, r, "5 STD", d.usage.map { ($0.five, $0.stale) }, d.now)
-        case .limitWeek: limit(c, r, "WOCHE", d.usage.map { ($0.week, $0.stale) }, d.now)
+        case .limit5: limit(c, r, "5 STD", d.usage.map { ($0.five, $0.stale) }, d.now, d.tick)
+        case .limitWeek: limit(c, r, "WOCHE", d.usage.map { ($0.week, $0.stale) }, d.now, d.tick)
         case .ready: ready(c, r, item.align ?? .right)
         case .bigClock: line(c, r, Renderer.clock(d.now), 0.917, 330, Palette.text, item.align ?? .center)
         case .date: line(c, r, Renderer.dateText(d.now), 0.79, 600, Palette.muted, item.align ?? .center)
@@ -299,27 +332,80 @@ enum Widgets {
         let rad = min(r.width, r.height) / 2, w = rad * 0.2
         let cx = r.midX, cy = r.midY
         c.arc(cx, cy, rad, w, 0, 360, Palette.track, caps: false)
+        // Wartet Claude auf dich, leuchtet der Ring in der Warnfarbe
+        let a1 = s.waiting ? Palette.theme.warn : Palette.theme.accent
+        let a2 = s.waiting ? Palette.theme.warn.mix(Palette.theme.bad, 0.4) : Palette.theme.accent2
         if !s.plan.isEmpty {
             let frac = CGFloat(s.done) / CGFloat(s.plan.count)
             if frac > 0 {
-                c.gradientArc(cx, cy, rad, w, 0, min(359.4, 360 * frac), Palette.theme.accent, Palette.theme.accent2)
+                c.gradientArc(cx, cy, rad, w, 0, min(359.4, 360 * frac), a1, a2)
+            } else if s.waiting {
+                c.arc(cx, cy, rad, w, 0, 360, Palette.warn.withAlphaComponent(0.35), caps: false)
             }
             c.text(cx, cy - rad * 0.1, "\(s.done)", roundedFont(rad * 0.75, 700), Palette.text, h: .center, v: .middle)
             c.text(cx, cy + rad * 0.475, "von \(s.plan.count)", roundedFont(rad * 0.275, 600), Palette.muted, h: .center, v: .middle)
         } else {
             let start = CGFloat((tick * 40) % 360)
-            c.gradientArc(cx, cy, rad, w, start, start + 80, Palette.theme.accent, Palette.theme.accent2)
-            c.text(cx, cy, "···", roundedFont(rad * 0.55, 700), Palette.muted, h: .center, v: .middle)
+            if s.waiting { c.arc(cx, cy, rad, w, 0, 360, Palette.warn, caps: false) }
+            else { c.gradientArc(cx, cy, rad, w, start, start + 80, a1, a2) }
+            c.text(cx, cy, s.waiting ? "?" : "···", roundedFont(rad * 0.55, 700), s.waiting ? Palette.warn : Palette.muted, h: .center, v: .middle)
         }
     }
 
     static func status(_ c: Canvas, _ r: CGRect, _ s: SessionInfo, _ tick: Int) {
         let k = r.height / 14
-        c.circle(r.minX + 4 * k, r.midY, (tick % 2 == 0 ? 5.5 : 4.2) * k, Palette.goodGlow)
-        c.circle(r.minX + 4 * k, r.midY, 3.4 * k, Palette.good)
+        let col = s.waiting ? Palette.warn : Palette.good
+        let glow = (s.waiting ? Palette.theme.warn : Palette.theme.good).mix(RGB(0, 0, 0), 0.75).ns
+        c.circle(r.minX + 4 * k, r.midY, (tick % 2 == 0 ? 5.5 : 4.2) * k, glow)
+        c.circle(r.minX + 4 * k, r.midY, 3.4 * k, col)
         let f = roundedFont(10 * k, 700)
-        c.spaced(r.minX + 13 * k, r.midY - (f.ascender - f.descender) / 2,
-                 "ARBEITET" + (s.busyCount > 1 ? "  +\(s.busyCount - 1)" : ""), f, Palette.good, 1.2 * k)
+        // „1/2“ beim Durchwechseln, sonst „+1“ für weitere arbeitende Sitzungen
+        let more = s.total > 1 ? "  \(s.index)/\(s.total)" : s.busyCount > 1 ? "  +\(s.busyCount - 1)" : ""
+        let text = (s.waiting ? "WARTET AUF DICH" : "ARBEITET") + more
+        let maxw = r.width - 13 * k
+        var size = 10 * k, ff = f
+        while size > 5, c.tlen(text, ff) + CGFloat(text.count) * 1.2 * k > maxw { size -= 0.5; ff = roundedFont(size, 700) }
+        c.spaced(r.minX + 13 * k, r.midY - (ff.ascender - ff.descender) / 2, text, ff, col, 1.2 * k * size / (10 * k))
+    }
+
+    /// Modell-ID lesbar machen: „claude-opus-5-5“ → „Opus 5.5“
+    static func modelName(_ id: String) -> String {
+        var p = id.split(separator: "-").map(String.init)
+        if p.first == "claude" { p.removeFirst() }
+        p = p.filter { !($0.count == 8 && Int($0) != nil) && !$0.hasPrefix("[") }     // Datumsangaben, [1m]
+        guard let fam = p.first else { return id }
+        let nums = p.dropFirst().filter { Int($0) != nil }
+        return fam.prefix(1).uppercased() + fam.dropFirst() + (nums.isEmpty ? "" : " " + nums.joined(separator: "."))
+    }
+
+    /// Kleines Zweig-Symbol und Branch-Name
+    static func branch(_ c: Canvas, _ r: CGRect, _ name: String, _ a: TextAlign) {
+        let k = r.height / 15, f = roundedFont(12 * k, 600)
+        let icon = 12 * k, maxText = r.width - icon
+        let text = c.fit(name, f, maxText)
+        let total = icon + c.tlen(text, f)
+        let x0: CGFloat = a == .left ? r.minX : a == .center ? r.midX - total / 2 : r.maxX - total
+        let col = Palette.muted
+        // zwei Punkte, verbunden – wie ein Abzweig
+        c.ctx.setStrokeColor(col.cgColor); c.ctx.setLineWidth(1.4 * k); c.ctx.setLineCap(.round)
+        c.ctx.move(to: CGPoint(x: x0 + 3 * k, y: r.midY - 5 * k)); c.ctx.addLine(to: CGPoint(x: x0 + 3 * k, y: r.midY + 5 * k))
+        c.ctx.move(to: CGPoint(x: x0 + 3 * k, y: r.midY + 1 * k))
+        c.ctx.addQuadCurve(to: CGPoint(x: x0 + 8 * k, y: r.midY - 4 * k), control: CGPoint(x: x0 + 8 * k, y: r.midY + 1 * k))
+        c.ctx.strokePath()
+        c.circle(x0 + 3 * k, r.midY + 5 * k, 1.7 * k, col)
+        c.circle(x0 + 8 * k, r.midY - 4.5 * k, 1.7 * k, col)
+        c.text(x0 + icon, r.midY, text, f, col, v: .middle)
+    }
+
+    /// Anzeige mit Prozentzahl und Balken (Kontext)
+    static func meter(_ c: Canvas, _ r: CGRect, _ label: String, _ pct: Int, _ col: NSColor, _ tick: Int) {
+        let k = r.height / 34
+        c.spaced(r.minX, r.minY + 1 * k, label, roundedFont(9 * k, 700), Palette.dim, 1.1 * k)
+        let big = roundedFont(16 * k, 700), base = r.minY + 24 * k
+        let color = pct >= 90 ? Palette.bad : pct >= 75 ? Palette.warn : col
+        c.text(r.minX, base, "\(pct)", big, color, v: .baseline)
+        c.text(r.minX + c.tlen("\(pct)", big) + k, base, "%", roundedFont(10 * k, 650), color, v: .baseline)
+        c.bar(r.minX, r.minY + 28 * k, r.maxX, 4 * k, pct, color)
     }
 
     static func name(_ c: Canvas, _ r: CGRect, _ name: String, _ a: TextAlign) {
@@ -341,13 +427,15 @@ enum Widgets {
     static func step(_ c: Canvas, _ r: CGRect, _ s: SessionInfo) {
         let k = r.height / 44
         let text: String, col: NSColor, accent: NSColor
-        if !s.plan.isEmpty {
+        if s.waiting {
+            text = s.activity ?? "Wartet auf dich"; col = Palette.warn; accent = Palette.warn
+        } else if !s.plan.isEmpty {
             if let cur = s.currentStep { text = cur; col = Palette.text; accent = Palette.accent }
             else { text = "Alle Schritte erledigt"; col = Palette.good; accent = Palette.good }
         } else {
             text = s.prompt ?? "Denkt nach …"; col = Palette.text; accent = Palette.accent
         }
-        c.rrect(r.minX, r.minY, r.maxX, r.maxY, min(12 * k, r.width / 2, r.height / 2), stroke: Palette.edge)
+        c.rrect(r.minX, r.minY, r.maxX, r.maxY, min(12 * k, r.width / 2, r.height / 2), stroke: s.waiting ? Palette.warn : Palette.edge)
         c.rrect(r.minX + 7 * k, r.minY + 9 * k, r.minX + 10.5 * k, r.maxY - 9 * k, 1.75 * k, fill: accent)
         let f = roundedFont(15 * k, 600), lh = 19 * k
         let maxLines = max(1, Int((r.height - 6 * k) / lh))
@@ -359,7 +447,7 @@ enum Widgets {
         }
     }
 
-    static func limit(_ c: Canvas, _ r: CGRect, _ label: String, _ v: (UsageWindow, Date?)?, _ now: Date) {
+    static func limit(_ c: Canvas, _ r: CGRect, _ label: String, _ v: (UsageWindow, Date?)?, _ now: Date, _ tick: Int = 0) {
         let k = r.height / 48
         c.spaced(r.minX, r.minY + 2 * k, label, roundedFont(10 * k, 700), Palette.dim, 1.2 * k)
         let base = r.minY + 36 * k
@@ -375,10 +463,22 @@ enum Widgets {
         c.text(r.minX, base, "\(w.pct)", big, col, v: .baseline)
         c.text(r.minX + c.tlen("\(w.pct)", big) + k, base, "%", roundedFont(13 * k, 650), col, v: .baseline)
         let small = roundedFont(11 * k, 560)
+        // Limit fast erreicht: pulsierender Rahmen und deutlicher Hinweis auf den Reset
+        let critical = w.pct >= 90 && stale == nil
+        if critical {
+            let pad = 3 * k
+            c.rrect(r.minX - pad, r.minY - pad, r.maxX + pad, r.maxY + pad, 6 * k,
+                    stroke: tick % 2 == 0 ? Palette.bad : Palette.bad.withAlphaComponent(0.35), width: max(1, 1.5 * k))
+        }
         if let stale {
             c.text(r.maxX, base, "Stand " + Renderer.clock(stale), small, Palette.dim, h: .right, v: .baseline)
         } else if let reset = w.reset {
-            c.text(r.maxX, base, Renderer.fmtReset(reset.timeIntervalSince(now)), small, Palette.muted, h: .right, v: .baseline)
+            let t = Renderer.fmtReset(reset.timeIntervalSince(now))
+            let f = critical ? roundedFont(11 * k, 700) : small
+            // „Reset 45 min“, wenn Platz ist – sonst nur die Zeit
+            let pctWidth = c.tlen("\(w.pct)%", big) + 6 * k
+            let label = critical && c.tlen("Reset " + t, f) <= r.width - pctWidth ? "Reset " + t : t
+            c.text(r.maxX, base, label, f, critical ? Palette.bad : Palette.muted, h: .right, v: .baseline)
         }
         c.bar(r.minX, r.minY + 41 * k, r.maxX, 5 * k, w.pct, col)
     }

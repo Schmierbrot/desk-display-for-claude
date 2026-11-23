@@ -13,6 +13,16 @@ struct SessionInfo: Equatable {
     var plan: [PlanItem]
     var prompt: String?
     var busyCount: Int
+    /// Claude wartet auf dich (Rückfrage, Freigabe, „wartet auf dich“)
+    var waiting = false
+    var model: String? = nil
+    var contextPct: Int? = nil
+    var branch: String? = nil
+    /// was Claude gerade tut, z. B. „Bearbeitet Renderer.swift“
+    var activity: String? = nil
+    /// Position beim Durchwechseln mehrerer Sitzungen (1 von total)
+    var index = 1
+    var total = 1
 
     var done: Int { plan.filter { $0.status == "completed" }.count }
     var currentStep: String? {
@@ -40,6 +50,20 @@ final class TranscriptState {
     private var rest = Data()
     private(set) var plan: [PlanItem] = []
     private(set) var lastPrompt: String?
+    private(set) var model: String?
+    private(set) var contextTokens = 0
+    private(set) var branch: String?
+    private(set) var activity: String?
+    private(set) var awaitingUser = false
+    private(set) var lastEvent: Date?
+    private var pendingQuestion: String?        // tool_use_id einer offenen Rückfrage
+
+    /// Kontext-Füllstand in Prozent (200 000 Token, darüber Modelle mit 1 Mio.)
+    var contextPct: Int? {
+        guard contextTokens > 0 else { return nil }
+        let limit = contextTokens > 200_000 ? 1_000_000 : 200_000
+        return min(100, contextTokens * 100 / limit)
+    }
 
     /// Cloud-Sitzung: Ereignisse kommen per `feed`, Eingaben gelten als Aufgabe
     private let promptsFromUser: Bool
@@ -54,7 +78,7 @@ final class TranscriptState {
         guard let url, let fh = try? FileHandle(forReadingFrom: url) else { return }
         defer { try? fh.close() }
         let size = (try? fh.seekToEnd()) ?? 0
-        if size < offset { offset = 0; rest = Data(); plan = []; lastPrompt = nil }
+        if size < offset { offset = 0; rest = Data(); plan = []; lastPrompt = nil; awaitingUser = false; activity = nil }
         guard size > offset else { return }
         try? fh.seek(toOffset: offset)
         guard let data = try? fh.readToEnd() else { return }
@@ -78,20 +102,45 @@ final class TranscriptState {
         // Unteragenten: lokal isSidechain, in der Cloud parent_tool_use_id
         guard (d["isSidechain"] as? Bool) != true, d["parent_tool_use_id"] as? String == nil,
               let msg = d["message"] as? [String: Any] else { return }
-        if promptsFromUser, type == "user" {
-            let text = (msg["content"] as? String)
-                ?? (msg["content"] as? [[String: Any]])?.filter { $0["type"] as? String == "text" }
-                    .compactMap { $0["text"] as? String }.joined(separator: " ")
-            if let t = text?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty, !t.hasPrefix("<") { lastPrompt = t }
+        if let b = d["gitBranch"] as? String, !b.isEmpty, b != "HEAD" { branch = b }
+        if let ts = d["timestamp"] as? String, let t = CloudSessions.date(ts) { lastEvent = t }
+        if type == "user", (d["isMeta"] as? Bool) != true {
+            // Systemhinweise (<…>) gehören nicht zur Eingabe – auch wenn sie im selben Beitrag stehen
+            let parts = (msg["content"] as? String).map { [$0] }
+                ?? (msg["content"] as? [[String: Any]])?.filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String } ?? []
+            let t = parts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty && !$0.hasPrefix("<") }
+                .joined(separator: " ")
+            if !t.isEmpty {
+                if promptsFromUser { lastPrompt = t }
+                awaitingUser = false            // du hast geantwortet
+                activity = "Liest deine Nachricht"
+            }
         }
         guard let content = msg["content"] as? [[String: Any]] else { return }
         if type == "user" {
+            if let q = pendingQuestion, content.contains(where: { $0["tool_use_id"] as? String == q }) {
+                pendingQuestion = nil; awaitingUser = false
+            }
             handleResults(content, (d["toolUseResult"] ?? d["tool_use_result"]) as? [String: Any]); return
         }
         guard type == "assistant" else { return }
+        if let m = msg["model"] as? String, !m.isEmpty, !m.hasPrefix("<") { model = m }
+        if let u = msg["usage"] as? [String: Any] {
+            let n = ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"].reduce(0) { $0 + ((u[$1] as? Int) ?? 0) }
+            if n > 0 { contextTokens = n }
+        }
+        // Claude macht weiter → wartet nicht mehr (außer es fragt gerade selbst)
+        awaitingUser = false
+        if content.contains(where: { $0["type"] as? String == "text" }) && !content.contains(where: { $0["type"] as? String == "tool_use" }) {
+            activity = "Schreibt die Antwort"
+        }
         for c in content where c["type"] as? String == "tool_use" {
             let name = c["name"] as? String ?? ""
             let input = c["input"] as? [String: Any] ?? [:]
+            if let a = Self.describe(name, input) { activity = a }
+            if name == "AskUserQuestion" || name == "ExitPlanMode" {
+                awaitingUser = true; pendingQuestion = c["id"] as? String
+            }
             if name == "TaskCreate" {
                 let subject = (input["subject"] as? String) ?? (input["description"] as? String) ?? ""
                 if plan.allSatisfy({ $0.status == "completed" }) && plan.contains(where: { $0.id != nil }) {
@@ -109,9 +158,10 @@ final class TranscriptState {
                 if let sub = input["subject"] as? String, !sub.isEmpty { plan[i].text = sub }
             } else if name.hasSuffix("update_plan") {
                 applyPlanUpdate(input)
-            } else if name.hasSuffix("wrap_up"), (input["blocked"] as? Bool) != true {
+            } else if name.hasSuffix("wrap_up") {
                 // Wartet Claude auf dich (blocked), ist der Plan noch nicht fertig.
-                for i in plan.indices { plan[i].status = "completed" }
+                if (input["blocked"] as? Bool) == true { awaitingUser = true }
+                else { awaitingUser = false; for i in plan.indices { plan[i].status = "completed" } }
             } else if name == "TodoWrite", let todos = input["todos"] as? [[String: Any]] {
                 plan = todos.map { PlanItem(text: $0["content"] as? String ?? "",
                                             status: $0["status"] as? String ?? "pending") }
@@ -134,6 +184,31 @@ final class TranscriptState {
                 }
             }
             if let id { plan[idx].id = id } else if c["is_error"] as? Bool == true { plan.remove(at: idx) }
+        }
+    }
+
+    /// Kurze Beschreibung, was ein Werkzeugaufruf tut (nil = nicht anzeigen)
+    static func describe(_ name: String, _ input: [String: Any]) -> String? {
+        func file(_ k: String) -> String? { (input[k] as? String).map { ($0 as NSString).lastPathComponent } }
+        switch name {
+        case "Edit", "MultiEdit", "Write", "NotebookEdit": return file("file_path").map { "Bearbeitet \($0)" } ?? "Bearbeitet Dateien"
+        case "Read": return file("file_path").map { "Liest \($0)" } ?? "Liest Dateien"
+        case "Bash", "PowerShell":
+            if let d = input["description"] as? String, !d.isEmpty { return d }
+            return (input["command"] as? String).map { "Führt aus: " + $0.prefix(60) } ?? "Führt Befehle aus"
+        case "Grep", "Glob": return "Durchsucht den Code"
+        case "WebFetch", "WebSearch": return "Recherchiert im Web"
+        case "Agent", "Task": return (input["description"] as? String).map { "Agent: \($0)" } ?? "Startet einen Agenten"
+        case "AskUserQuestion": return "Hat eine Frage an dich"
+        case "ExitPlanMode": return "Wartet auf deine Freigabe"
+        case "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "ToolSearch": return nil
+        default:
+            if name.hasSuffix("update_plan") || name.hasSuffix("wrap_up") || name.hasSuffix("mark_chapter") { return nil }
+            if name.hasPrefix("mcp__") {
+                let parts = name.split(separator: "_", omittingEmptySubsequences: true)
+                return "Nutzt \(parts.count > 2 ? String(parts[parts.count - 1]) : name)"
+            }
+            return "Nutzt \(name)"
         }
     }
 
@@ -172,40 +247,62 @@ final class ClaudeData {
     private var projectsDir: URL { home.appendingPathComponent(".claude/projects") }
 
     /// Sitzung, in der gerade gearbeitet wird (zuletzt aktiv), sonst nil.
-    func currentSession() -> SessionInfo? {
+    func currentSession() -> SessionInfo? { sessions().first }
+
+    private var idleChecked: [String: Date] = [:]
+
+    /// Alle Sitzungen, die gerade etwas zu zeigen haben: zuerst die, die auf dich warten,
+    /// dann die arbeitenden (neueste zuerst), dann Cloud-Sitzungen.
+    func sessions() -> [SessionInfo] {
         let files = (try? FileManager.default.contentsOfDirectory(at: sessionsDir, includingPropertiesForKeys: nil)) ?? []
-        var busy: [[String: Any]] = []
+        var found: [(info: [String: Any], waiting: Bool)] = []
         var anyStatus = false
+        let now = Date()
         for f in files where f.pathExtension == "json" {
             guard let data = try? Data(contentsOf: f),
                   let s = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let pid = (s["pid"] as? NSNumber)?.int32Value, pidAlive(pid) else { continue }
             let status = s["status"] as? String
             if status != nil { anyStatus = true }
-            if status != nil && status != "idle" { busy.append(s) }
+            if let status, status != "idle" {
+                found.append((s, status == "waiting"))
+            } else if status == "idle", let id = s["sessionId"] as? String {
+                // Runde beendet mit offener Frage an dich? Nur alle 5 s nachsehen.
+                guard let st = transcript(id) else { continue }
+                if now.timeIntervalSince(idleChecked[id] ?? .distantPast) > 5 { st.update(); idleChecked[id] = now }
+                if st.awaitingUser, now.timeIntervalSince(st.lastEvent ?? .distantPast) < 2 * 3600 { found.append((s, true)) }
+            }
         }
         // Ältere Claude-Code-Versionen schreiben keinen Status: dann gilt die Sitzung
         // als aktiv, deren Protokoll gerade wächst.
-        if !anyStatus, let s = recentlyActiveTranscript() { busy.append(s) }
-        busy.sort { ($0["statusUpdatedAt"] as? Double ?? 0) > ($1["statusUpdatedAt"] as? Double ?? 0) }
-        // Cloud-Sitzungen (Claude Code im Browser/in der Cloud) – lokale Arbeit hat Vorrang
-        let cloud = CloudSessions.shared.running()
-        guard let s = busy.first else {
-            guard var c = cloud.first else { return nil }
-            c.busyCount = cloud.count
-            return c
-        }
+        if !anyStatus, let s = recentlyActiveTranscript() { found.append((s, false)) }
+        found.sort { ($0.info["statusUpdatedAt"] as? Double ?? 0) > ($1.info["statusUpdatedAt"] as? Double ?? 0) }
 
-        let id = s["sessionId"] as? String ?? ""
-        let st = transcript(id)
-        st?.update()
-        let cwd = s["cwd"] as? String ?? ""
-        let name = (s["name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            ?? (cwd as NSString).lastPathComponent
-        let since = (s["statusUpdatedAt"] as? Double ?? 0) / 1000
-        return SessionInfo(name: name.isEmpty ? "Sitzung" : name,
-                           secs: max(0, Int(Date().timeIntervalSince1970 - since)),
-                           plan: st?.plan ?? [], prompt: st?.lastPrompt, busyCount: busy.count + cloud.count)
+        var list: [SessionInfo] = found.map { f in
+            let s = f.info
+            let id = s["sessionId"] as? String ?? ""
+            let st = transcript(id)
+            st?.update()
+            let cwd = s["cwd"] as? String ?? ""
+            let name = (s["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? (cwd as NSString).lastPathComponent
+            let since = (s["statusUpdatedAt"] as? Double ?? 0) / 1000
+            let waiting = f.waiting || (st?.awaitingUser ?? false)
+            return SessionInfo(name: name.isEmpty ? "Sitzung" : name,
+                               secs: max(0, Int(now.timeIntervalSince1970 - since)),
+                               plan: st?.plan ?? [], prompt: st?.lastPrompt, busyCount: 0,
+                               waiting: waiting, model: st?.model, contextPct: st?.contextPct,
+                               branch: st?.branch, activity: waiting ? (st?.activity.flatMap(Self.waitingText) ?? "Wartet auf dich") : st?.activity)
+        }
+        // Cloud-Sitzungen (Claude Code im Browser/in der Cloud) – lokale Arbeit hat Vorrang
+        list += CloudSessions.shared.running()
+        list = list.filter(\.waiting) + list.filter { !$0.waiting }
+        for i in list.indices { list[i].busyCount = list.count }
+        return list
+    }
+
+    /// Bei wartenden Sitzungen nur passende Texte zeigen
+    private static func waitingText(_ a: String) -> String? {
+        a.hasPrefix("Hat eine Frage") || a.hasPrefix("Wartet") ? a : nil
     }
 
     /// Für den Fall ohne Status: jüngstes Protokoll, das in den letzten 20 s geschrieben wurde.
@@ -277,6 +374,7 @@ final class ClaudeData {
             case .ok(let s):
                 lastLive = s
                 ClaudeData.saveSample(s)
+                UsageHistory.shared.add(five: s.five.pct, week: s.week.pct)
                 nextFetch = now.addingTimeInterval(60)
             case .rateLimited:
                 nextFetch = now.addingTimeInterval(30)

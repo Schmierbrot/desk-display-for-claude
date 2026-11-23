@@ -87,7 +87,7 @@ public sealed class MainWindow : Window
         limits.Children.Add(five); limits.Children.Add(week);
         var right = new ScrollViewer
         {
-            Content = new StackPanel { Spacing = 18, Margin = new Thickness(28, 26, 28, 26), Children = { top, banners, session, limits } },
+            Content = new StackPanel { Spacing = 18, Margin = new Thickness(28, 26, 28, 26), Children = { top, banners, session, limits, new UsageChartCard() } },
         };
         var root = new DockPanel();
         DockPanel.SetDock(leftBorder, Dock.Left);

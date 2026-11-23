@@ -20,6 +20,7 @@ final class CloudSessions {
         var since = Date()
         var title = ""
         var lastEvent = Date.distantPast
+        var waiting = false
     }
     private var tracked: [String: Tracked] = [:]
     private var nextList = Date.distantPast
@@ -63,10 +64,12 @@ final class CloudSessions {
                 let status = s["status"] as? String, bucket = s["status_bucket"] as? String
                 let worker = s["worker_status"] as? String
                 let last = Self.date(s["last_event_at"] as? String) ?? .distantPast
-                let working = status != "archived" && (bucket == "working" || worker == "running")
+                let waitingBucket = ["wait", "input", "action", "attention", "blocked"].contains { (bucket ?? "").contains($0) }
+                let working = status != "archived" && (bucket == "working" || worker == "running" || waitingBucket)
                 guard working, now.timeIntervalSince(last) < 15 * 60 else { continue }
                 var t = tracked[id] ?? Tracked()
                 t.title = (s["title"] as? String) ?? ""
+                t.waiting = waitingBucket
                 t.lastEvent = last
                 tracked[id] = t
                 ids.append((id, last))
@@ -78,9 +81,12 @@ final class CloudSessions {
         for id in runningIds { loadEvents(id) }
         publish(runningIds.compactMap { id in
             guard let t = tracked[id] else { return nil }
+            let waiting = t.waiting || t.state.awaitingUser
             return SessionInfo(name: t.title.isEmpty ? "Cloud-Sitzung" : t.title,
                                secs: max(0, Int(now.timeIntervalSince(t.since))),
-                               plan: t.state.plan, prompt: t.state.lastPrompt, busyCount: runningIds.count)
+                               plan: t.state.plan, prompt: t.state.lastPrompt, busyCount: runningIds.count,
+                               waiting: waiting, model: t.state.model, contextPct: t.state.contextPct,
+                               branch: t.state.branch, activity: waiting ? "Wartet auf dich" : t.state.activity)
         })
     }
 

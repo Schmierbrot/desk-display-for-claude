@@ -13,6 +13,8 @@ enum Palette {
     static var accent: NSColor { theme.accent.ns }
     static var accent2: NSColor { theme.accent2.ns }
     static var good: NSColor { theme.good.ns }
+    static var warn: NSColor { theme.warn.ns }
+    static var bad: NSColor { theme.bad.ns }
     static var goodGlow: NSColor { theme.good.mix(RGB(0, 0, 0), 0.75).ns }
     static func forPct(_ p: Int) -> NSColor { theme.forPct(p).ns }
 }

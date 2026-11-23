@@ -13,7 +13,8 @@ rm -rf "$WORK"
 mkdir -p "$WORK/root/Applications" "$WORK/resources"
 cp -R "build/Claude Display.app" "$WORK/root/Applications/"
 cp installer/resources/*.html "$WORK/resources/"
-/usr/local/bin/python3 installer/make_backgrounds.py "$WORK/resources" >/dev/null
+PY=${PYTHON:-$( [ -x /usr/local/bin/python3 ] && echo /usr/local/bin/python3 || command -v python3 )}
+"$PY" installer/make_backgrounds.py "$WORK/resources" >/dev/null
 chmod +x installer/scripts/*
 
 # Komponente: App nach /Applications, Skripte beenden/starten die App

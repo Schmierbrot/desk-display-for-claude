@@ -77,7 +77,15 @@ final class Engine {
     private func step() {
         let s = AppSettings.shared
         let host = s.host, enabled = s.enabled, live = s.liveUsage, brightness = s.brightness()
-        let sess = data.currentSession()
+        // Mehrere Sitzungen: wer auf dich wartet, kommt zuerst; sonst alle 8 s die nächste
+        let all = data.sessions()
+        let group = all.contains(where: \.waiting) ? all.filter(\.waiting) : all
+        var sess: SessionInfo? = nil
+        if !group.isEmpty {
+            let i = s.rotateSessions ? (tick / 8) % group.count : 0
+            sess = group[i]
+            sess?.index = i + 1; sess?.total = group.count
+        }
         let use = data.usage(live: live, fetch: enabled && status != .standby)
         tick += 1
         let canvas = Renderer.render(session: sess, usage: use, tick: tick)

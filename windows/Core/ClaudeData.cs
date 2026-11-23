@@ -11,6 +11,17 @@ public sealed record PlanItem(string Text, string Status, string? Id = null);
 /// <summary>Die gerade arbeitende Claude-Code-Sitzung.</summary>
 public sealed record SessionInfo(string Name, int Secs, IReadOnlyList<PlanItem> Plan, string? Prompt, int BusyCount)
 {
+    /// <summary>Claude wartet auf dich (Rückfrage, Freigabe, „wartet auf dich“).</summary>
+    public bool Waiting { get; init; }
+    public string? Model { get; init; }
+    public int? ContextPct { get; init; }
+    public string? Branch { get; init; }
+    /// <summary>Was Claude gerade tut, z. B. „Bearbeitet Renderer.cs“.</summary>
+    public string? Activity { get; init; }
+    /// <summary>Position beim Durchwechseln mehrerer Sitzungen (1 von Total).</summary>
+    public int Index { get; init; } = 1;
+    public int Total { get; init; } = 1;
+
     public int Done => Plan.Count(p => p.Status == "completed");
     public string? CurrentStep =>
         Plan.FirstOrDefault(p => p.Status == "in_progress")?.Text ?? Plan.FirstOrDefault(p => p.Status == "pending")?.Text;
@@ -31,6 +42,16 @@ sealed class TranscriptState
     List<PlanItem> plan = [];
     public IReadOnlyList<PlanItem> Plan => plan;
     public string? LastPrompt { get; private set; }
+    public string? Model { get; private set; }
+    public int ContextTokens { get; private set; }
+    public string? Branch { get; private set; }
+    public string? Activity { get; private set; }
+    public bool AwaitingUser { get; private set; }
+    public DateTime? LastEvent { get; private set; }
+    string? pendingQuestion;
+
+    /// <summary>Kontext-Füllstand in Prozent (200 000 Token, darüber Modelle mit 1 Mio.).</summary>
+    public int? ContextPct => ContextTokens <= 0 ? null : Math.Min(100, (int)((long)ContextTokens * 100 / (ContextTokens > 200_000 ? 1_000_000 : 200_000)));
 
     public TranscriptState(string path) => this.path = path;
     public TranscriptState() { path = null; promptsFromUser = true; }
@@ -44,7 +65,7 @@ sealed class TranscriptState
         try
         {
             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            if (fs.Length < offset) { offset = 0; rest = []; plan = []; LastPrompt = null; }
+            if (fs.Length < offset) { offset = 0; rest = []; plan = []; LastPrompt = null; AwaitingUser = false; Activity = null; }
             if (fs.Length == offset) return;
             fs.Seek(offset, SeekOrigin.Begin);
             var data = new byte[fs.Length - offset];
@@ -76,25 +97,49 @@ sealed class TranscriptState
         // Unteragenten: lokal isSidechain, in der Cloud parent_tool_use_id
         if (Bool(d, "isSidechain") || Str(d, "parent_tool_use_id") != null) return;
         if (!d.TryGetProperty("message", out var msg) || msg.ValueKind != JsonValueKind.Object) return;
-        if (promptsFromUser && type == "user" && msg.TryGetProperty("content", out var pc))
+        if (Str(d, "gitBranch") is { Length: > 0 } gb && gb != "HEAD") Branch = gb;
+        if (DateTimeOffset.TryParse(Str(d, "timestamp"), out var ts)) LastEvent = ts.UtcDateTime;
+        if (type == "user" && !Bool(d, "isMeta") && msg.TryGetProperty("content", out var pc))
         {
-            var text = pc.ValueKind == JsonValueKind.String ? pc.GetString()
-                : pc.ValueKind == JsonValueKind.Array ? string.Join(" ", pc.EnumerateArray().Where(x => Str(x, "type") == "text").Select(x => Str(x, "text"))) : null;
-            text = text?.Trim();
-            if (!string.IsNullOrEmpty(text) && !text.StartsWith('<')) LastPrompt = text;
+            // Systemhinweise (<…>) gehören nicht zur Eingabe – auch wenn sie im selben Beitrag stehen
+            var parts = pc.ValueKind == JsonValueKind.String ? [pc.GetString() ?? ""]
+                : pc.ValueKind == JsonValueKind.Array ? pc.EnumerateArray().Where(x => Str(x, "type") == "text").Select(x => Str(x, "text") ?? "").ToList() : [];
+            var text = string.Join(" ", parts.Select(p => p.Trim()).Where(p => p.Length > 0 && !p.StartsWith('<')));
+            if (text.Length > 0)
+            {
+                if (promptsFromUser) LastPrompt = text;
+                AwaitingUser = false;            // du hast geantwortet
+                Activity = "Liest deine Nachricht";
+            }
         }
         if (!msg.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array) return;
         if (type == "user")
         {
+            if (pendingQuestion != null && content.EnumerateArray().Any(x => Str(x, "tool_use_id") == pendingQuestion))
+            { pendingQuestion = null; AwaitingUser = false; }
             var tr = d.TryGetProperty("toolUseResult", out var a) ? a : d.TryGetProperty("tool_use_result", out var b) ? b : default;
             HandleResults(content, tr); return;
         }
         if (type != "assistant") return;
+        if (Str(msg, "model") is { Length: > 0 } model && !model.StartsWith('<')) Model = model;
+        if (msg.TryGetProperty("usage", out var u) && u.ValueKind == JsonValueKind.Object)
+        {
+            int n = 0;
+            foreach (var k in new[] { "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens" })
+                if (u.TryGetProperty(k, out var v) && v.TryGetInt32(out var x)) n += x;
+            if (n > 0) ContextTokens = n;
+        }
+        // Claude macht weiter → wartet nicht mehr (außer es fragt gerade selbst)
+        AwaitingUser = false;
+        var blocks = content.EnumerateArray().ToList();
+        if (blocks.Any(x => Str(x, "type") == "text") && !blocks.Any(x => Str(x, "type") == "tool_use")) Activity = "Schreibt die Antwort";
         foreach (var c in content.EnumerateArray())
         {
             if (Str(c, "type") != "tool_use") continue;
             var name = Str(c, "name") ?? "";
             var input = c.TryGetProperty("input", out var i) ? i : default;
+            if (Describe(name, input) is { } act) Activity = act;
+            if (name is "AskUserQuestion" or "ExitPlanMode") { AwaitingUser = true; pendingQuestion = Str(c, "id"); }
             if (name == "TaskCreate")
             {
                 var subject = Str(input, "subject") ?? Str(input, "description") ?? "";
@@ -116,8 +161,12 @@ sealed class TranscriptState
                 if (Str(input, "subject") is { Length: > 0 } sub) plan[k] = plan[k] with { Text = sub };
             }
             else if (name.EndsWith("update_plan")) ApplyPlanUpdate(input);
-            else if (name.EndsWith("wrap_up") && !Bool(input, "blocked"))
-                plan = plan.Select(p => p with { Status = "completed" }).ToList();   // blocked = wartet auf dich
+            else if (name.EndsWith("wrap_up"))
+            {
+                // blocked = wartet auf dich, der Plan ist dann noch nicht fertig
+                if (Bool(input, "blocked")) AwaitingUser = true;
+                else plan = plan.Select(p => p with { Status = "completed" }).ToList();
+            }
             else if (name == "TodoWrite" && input.ValueKind == JsonValueKind.Object && input.TryGetProperty("todos", out var todos))
                 plan = Items(todos);
         }
@@ -149,6 +198,29 @@ sealed class TranscriptState
             if (id != null) plan[idx] = plan[idx] with { Id = id };
             else if (Bool(c, "is_error")) plan.RemoveAt(idx);
         }
+    }
+
+    /// <summary>Kurze Beschreibung, was ein Werkzeugaufruf tut (null = nicht anzeigen).</summary>
+    public static string? Describe(string name, JsonElement input)
+    {
+        string? File(string k) => Str(input, k) is { } p ? Path.GetFileName(p.Replace('\\', '/')) : null;
+        switch (name)
+        {
+            case "Edit" or "MultiEdit" or "Write" or "NotebookEdit": return File("file_path") is { } f ? $"Bearbeitet {f}" : "Bearbeitet Dateien";
+            case "Read": return File("file_path") is { } r ? $"Liest {r}" : "Liest Dateien";
+            case "Bash" or "PowerShell":
+                if (Str(input, "description") is { Length: > 0 } desc) return desc;
+                return Str(input, "command") is { } cmd ? "Führt aus: " + cmd[..Math.Min(60, cmd.Length)] : "Führt Befehle aus";
+            case "Grep" or "Glob": return "Durchsucht den Code";
+            case "WebFetch" or "WebSearch": return "Recherchiert im Web";
+            case "Agent" or "Task": return Str(input, "description") is { } ad ? $"Agent: {ad}" : "Startet einen Agenten";
+            case "AskUserQuestion": return "Hat eine Frage an dich";
+            case "ExitPlanMode": return "Wartet auf deine Freigabe";
+            case "TodoWrite" or "TaskCreate" or "TaskUpdate" or "TaskList" or "TaskGet" or "ToolSearch": return null;
+        }
+        if (name.EndsWith("update_plan") || name.EndsWith("wrap_up") || name.EndsWith("mark_chapter")) return null;
+        if (name.StartsWith("mcp__")) { var parts = name.Split('_', StringSplitOptions.RemoveEmptyEntries); return "Nutzt " + parts[^1]; }
+        return "Nutzt " + name;
     }
 
     static List<PlanItem> Items(JsonElement arr) =>
@@ -186,10 +258,16 @@ public sealed class ClaudeData
     readonly Dictionary<string, TranscriptState> transcripts = [];
     static readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(10) };
 
-    public SessionInfo? CurrentSession()
+    public SessionInfo? CurrentSession() => Sessions().FirstOrDefault();
+
+    readonly Dictionary<string, DateTime> idleChecked = [];
+
+    /// <summary>Alle Sitzungen mit etwas zu zeigen: zuerst die wartenden, dann die arbeitenden (neueste zuerst), dann Cloud.</summary>
+    public List<SessionInfo> Sessions()
     {
-        var busy = new List<JsonElement>();
+        var found = new List<(JsonElement info, bool waiting)>();
         bool anyStatus = false;
+        var now = DateTime.UtcNow;
         try
         {
             foreach (var f in Directory.EnumerateFiles(SessionsDir, "*.json"))
@@ -200,7 +278,13 @@ public sealed class ClaudeData
                     if (!s.TryGetProperty("pid", out var pidEl) || !pidEl.TryGetInt32(out int pid) || !PidAlive(pid)) continue;
                     var status = s.TryGetProperty("status", out var st) ? st.GetString() : null;
                     if (status != null) anyStatus = true;
-                    if (status != null && status != "idle") busy.Add(s);
+                    if (status != null && status != "idle") found.Add((s, status == "waiting"));
+                    else if (status == "idle" && s.TryGetProperty("sessionId", out var sid) && sid.GetString() is { } id && Transcript(id) is { } tr)
+                    {
+                        // Runde beendet mit offener Frage an dich? Nur alle 5 s nachsehen.
+                        if (!idleChecked.TryGetValue(id, out var last) || now - last > TimeSpan.FromSeconds(5)) { tr.Update(); idleChecked[id] = now; }
+                        if (tr.AwaitingUser && now - (tr.LastEvent ?? DateTime.MinValue) < TimeSpan.FromHours(2)) found.Add((s, true));
+                    }
                 }
                 catch { }
             }
@@ -208,24 +292,32 @@ public sealed class ClaudeData
         catch { /* noch keine Sitzungsdateien */ }
         // Ältere Claude-Code-Versionen schreiben keinen Status: dann gilt die Sitzung
         // als aktiv, deren Protokoll gerade wächst.
-        if (!anyStatus && RecentlyActiveTranscript() is { } recent) busy.Add(recent);
+        if (!anyStatus && RecentlyActiveTranscript() is { } recent) found.Add((recent, false));
 
         static double Updated(JsonElement s) => s.TryGetProperty("statusUpdatedAt", out var v) && v.TryGetDouble(out var d) ? d : 0;
-        var cur = busy.OrderByDescending(Updated).FirstOrDefault();
+        var list = new List<SessionInfo>();
+        foreach (var (cur, w) in found.OrderByDescending(x => Updated(x.info)))
+        {
+            var id = cur.TryGetProperty("sessionId", out var sid) ? sid.GetString() ?? "" : "";
+            var tr = Transcript(id);
+            tr?.Update();
+            var cwd = cur.TryGetProperty("cwd", out var c) ? c.GetString() ?? "" : "";
+            var name = cur.TryGetProperty("name", out var n) ? n.GetString() : null;
+            if (string.IsNullOrWhiteSpace(name)) name = Path.GetFileName(cwd.TrimEnd('/', '\\'));
+            if (string.IsNullOrWhiteSpace(name)) name = "Sitzung";
+            var secs = (int)Math.Max(0, DateTimeOffset.UtcNow.ToUnixTimeSeconds() - Updated(cur) / 1000);
+            bool waiting = w || (tr?.AwaitingUser ?? false);
+            var act = tr?.Activity;
+            if (waiting) act = act != null && (act.StartsWith("Hat eine Frage") || act.StartsWith("Wartet")) ? act : "Wartet auf dich";
+            list.Add(new SessionInfo(name, secs, tr?.Plan.ToList() ?? [], tr?.LastPrompt, 0)
+            {
+                Waiting = waiting, Model = tr?.Model, ContextPct = tr?.ContextPct, Branch = tr?.Branch, Activity = act,
+            });
+        }
         // Cloud-Sitzungen (Claude Code im Browser/in der Cloud) – lokale Arbeit hat Vorrang
-        var cloud = CloudSessions.Shared.Running();
-        if (cur.ValueKind != JsonValueKind.Object)
-            return cloud.Count > 0 ? cloud[0] with { BusyCount = cloud.Count } : null;
-
-        var id = cur.TryGetProperty("sessionId", out var sid) ? sid.GetString() ?? "" : "";
-        var tr = Transcript(id);
-        tr?.Update();
-        var cwd = cur.TryGetProperty("cwd", out var c) ? c.GetString() ?? "" : "";
-        var name = cur.TryGetProperty("name", out var n) ? n.GetString() : null;
-        if (string.IsNullOrWhiteSpace(name)) name = Path.GetFileName(cwd.TrimEnd('/', '\\'));
-        if (string.IsNullOrWhiteSpace(name)) name = "Sitzung";
-        var secs = (int)Math.Max(0, DateTimeOffset.UtcNow.ToUnixTimeSeconds() - Updated(cur) / 1000);
-        return new SessionInfo(name, secs, tr?.Plan.ToList() ?? [], tr?.LastPrompt, busy.Count + cloud.Count);
+        list.AddRange(CloudSessions.Shared.Running());
+        list = list.Where(x => x.Waiting).Concat(list.Where(x => !x.Waiting)).ToList();
+        return list.Select(x => x with { BusyCount = list.Count }).ToList();
     }
 
     readonly Dictionary<string, double> activeSince = [];
@@ -297,7 +389,7 @@ public sealed class ClaudeData
         if (fetch && now >= nextFetch)
         {
             var (sample, limited, why) = UsageFromApi();
-            if (sample != null) { lastLive = sample; SaveSample(sample); nextFetch = now.AddSeconds(60); }
+            if (sample != null) { lastLive = sample; SaveSample(sample); UsageHistory.Shared.Add(sample.Five.Pct, sample.Week.Pct); nextFetch = now.AddSeconds(60); }
             else { nextFetch = now.AddSeconds(30); if (!limited) Log.Write("Limit: " + why); }
         }
         var best = lastLive;

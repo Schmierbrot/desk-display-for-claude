@@ -248,6 +248,9 @@ struct ClaudePage: View {
             Row(label: "Cloud-Sitzungen anzeigen", hint: "Auch Claude Code im Browser oder in der Cloud – über deinen Claude-Code-Login. Sitzungen auf diesem Rechner haben Vorrang.") {
                 Toggle("", isOn: $settings.cloudSessions).toggleStyle(.switch).labelsHidden()
             }
+            Row(label: "Mehrere Sitzungen abwechselnd zeigen", hint: "Arbeiten mehrere gleichzeitig, wechselt das Display alle 8 Sekunden. Wartet eine auf dich, hat sie Vorrang.") {
+                Toggle("", isOn: $settings.rotateSessions).toggleStyle(.switch).labelsHidden()
+            }
         }
     }
 }

@@ -6,10 +6,12 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP="build/Claude Display.app"
-VERSION="1.3.0"
+VERSION="1.4.0"
 # Update-Kanal: GitHub-Repo aus dem Git-Remote (owner/name), Firmware-Version aus dem Quelltext
 REPO=$(git -C .. remote get-url origin 2>/dev/null | sed -E 's#.*github\.com[:/]##; s#\.git$##' || true)
 FW_VERSION=$(grep -m1 'define FW_VERSION' ../firmware/src/main.cpp | cut -d'"' -f2)
+# Python mit Pillow (für das App-Symbol): bevorzugt /usr/local/bin/python3, sonst python3 aus dem PATH
+PY=${PYTHON:-$( [ -x /usr/local/bin/python3 ] && echo /usr/local/bin/python3 || command -v python3 )}
 
 # Universal: läuft auf Apple-Silicon- und Intel-Macs
 swift build -c release --arch arm64 --arch x86_64
@@ -24,7 +26,7 @@ fi
 
 # App-Symbol
 if [ ! -f build/AppIcon.icns ]; then
-    /usr/local/bin/python3 make_icon.py build/icon_1024.png
+    "$PY" make_icon.py build/icon_1024.png
     ICONSET=build/AppIcon.iconset
     mkdir -p "$ICONSET"
     for s in 16 32 128 256 512; do
